@@ -27,12 +27,14 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import EditPaymentDialog from '@/components/admin/EditPaymentDialog';
 
 export default function RunDetails() {
   const [run, setRun] = useState(null);
   const [runItems, setRunItems] = useState([]);
   const [confirmations, setConfirmations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [editingPayment, setEditingPayment] = useState(null);
 
   const urlParams = new URLSearchParams(window.location.search);
   const runId = urlParams.get('id');
@@ -411,10 +413,19 @@ Run: #${run.run_number}
                           <p className="text-sm text-gray-600 mt-1">{conf.notes}</p>
                         )}
                       </div>
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-teal-600">
-                          ${conf.total_amount?.toFixed(2) || '0.00'}
-                        </p>
+                      <div className="text-right flex items-center gap-2">
+                        <div>
+                          <p className="text-lg font-bold text-teal-600">
+                            ${conf.total_amount?.toFixed(2) || '0.00'}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditingPayment(conf)}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -424,6 +435,14 @@ Run: #${run.run_number}
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Payment Dialog */}
+      <EditPaymentDialog
+        confirmation={editingPayment}
+        isOpen={!!editingPayment}
+        onClose={() => setEditingPayment(null)}
+        onSuccess={loadData}
+      />
     </div>
   );
 }
