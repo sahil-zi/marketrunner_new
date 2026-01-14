@@ -10,6 +10,7 @@ import RunnerLogin from './pages/RunnerLogin';
 import RunnerPickStore from './pages/RunnerPickStore';
 import RunnerPicking from './pages/RunnerPicking';
 import Runs from './pages/Runs';
+import Returns from './pages/Returns';
 import __Layout from './Layout.jsx';
 
 
@@ -26,6 +27,7 @@ export const PAGES = {
     "RunnerPickStore": RunnerPickStore,
     "RunnerPicking": RunnerPicking,
     "Runs": Runs,
+    "Returns": Returns,
 }
 
 export const pagesConfig = {
