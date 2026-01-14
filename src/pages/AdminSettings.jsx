@@ -7,9 +7,9 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Key,
   Loader2,
-  User
+  Copy,
+  CheckCircle2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,15 +30,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 
 export default function AdminSettings() {
@@ -46,12 +38,10 @@ export default function AdminSettings() {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingStore, setEditingStore] = useState(null);
-  const [storeDialogOpen, setStoreDialogOpen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('runner');
-  const [isInviting, setIsInviting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -73,7 +63,6 @@ export default function AdminSettings() {
     }
   }
 
-  // Save store
   async function saveStore(storeData) {
     setIsSaving(true);
     try {
@@ -84,7 +73,7 @@ export default function AdminSettings() {
         await base44.entities.Store.create(storeData);
         toast.success('Store created');
       }
-      setStoreDialogOpen(false);
+      setIsDialogOpen(false);
       setEditingStore(null);
       loadData();
     } catch (error) {
@@ -94,7 +83,6 @@ export default function AdminSettings() {
     }
   }
 
-  // Delete store
   async function deleteStore(id) {
     try {
       await base44.entities.Store.delete(id);
@@ -106,204 +94,165 @@ export default function AdminSettings() {
     }
   }
 
-  // Invite user
-  async function inviteUser() {
-    if (!inviteEmail) {
-      toast.error('Please enter an email address');
-      return;
-    }
+  const runnerLoginUrl = `${window.location.origin}${window.location.pathname}#/RunnerLogin`;
 
-    setIsInviting(true);
-    try {
-      await base44.users.inviteUser(inviteEmail, inviteRole);
-      toast.success(`Invitation sent to ${inviteEmail}`);
-      setInviteEmail('');
-      loadData();
-    } catch (error) {
-      toast.error('Failed to send invitation');
-    } finally {
-      setIsInviting(false);
-    }
-  }
+  const copyRunnerLink = () => {
+    navigator.clipboard.writeText(runnerLoginUrl);
+    setCopiedLink(true);
+    toast.success('Link copied to clipboard');
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
         <p className="text-gray-500 mt-1">Manage stores and users</p>
       </div>
 
-      <Tabs defaultValue="stores" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="stores">Stores</TabsTrigger>
-          <TabsTrigger value="users">Users</TabsTrigger>
-        </TabsList>
-
-        {/* Stores Tab */}
-        <TabsContent value="stores" className="space-y-6">
-          <div className="flex justify-end">
-            <Button 
-              onClick={() => { setEditingStore({}); setStoreDialogOpen(true); }}
-              className="bg-teal-600 hover:bg-teal-700"
+      {/* Runner Access Link */}
+      <Card className="border-teal-200 bg-teal-50">
+        <CardHeader>
+          <CardTitle className="text-lg">Runner Access Link</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-600 mb-4">
+            Share this link with runners to access their mobile interface:
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={runnerLoginUrl}
+              readOnly
+              className="bg-white"
+            />
+            <Button
+              onClick={copyRunnerLink}
+              className="shrink-0"
             >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Store
+              {copiedLink ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy Link
+                </>
+              )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
 
-          <Card>
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
-                </div>
-              ) : stores.length === 0 ? (
-                <div className="text-center py-12">
-                  <StoreIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No stores added yet</p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Contact</TableHead>
-                      <TableHead className="w-24">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {stores.map(store => (
-                      <TableRow key={store.id}>
-                        <TableCell className="font-medium">{store.name}</TableCell>
-                        <TableCell>{store.location || '—'}</TableCell>
-                        <TableCell>{store.contact_info || '—'}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button 
-                              variant="ghost" 
-                              size="icon"
-                              onClick={() => { setEditingStore(store); setStoreDialogOpen(true); }}
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon"
-                              onClick={() => setDeleteConfirm(store)}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+      {/* Stores */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Stores</CardTitle>
+          <Button 
+            onClick={() => { setEditingStore({}); setIsDialogOpen(true); }}
+            className="bg-teal-600 hover:bg-teal-700"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Store
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+            </div>
+          ) : stores.length === 0 ? (
+            <div className="text-center py-8">
+              <StoreIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500">No stores yet</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead className="w-24">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {stores.map(store => (
+                  <TableRow key={store.id}>
+                    <TableCell className="font-medium">{store.name}</TableCell>
+                    <TableCell>{store.location || '—'}</TableCell>
+                    <TableCell>{store.contact_info || '—'}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          onClick={() => { setEditingStore(store); setIsDialogOpen(true); }}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          onClick={() => setDeleteConfirm(store)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
-        {/* Users Tab */}
-        <TabsContent value="users" className="space-y-6">
-          {/* Invite User */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Invite User</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Input
-                  placeholder="Email address"
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="flex-1"
-                />
-                <Select value={inviteRole} onValueChange={setInviteRole}>
-                  <SelectTrigger className="w-full sm:w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="runner">Runner</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button 
-                  onClick={inviteUser}
-                  disabled={isInviting}
-                  className="bg-teal-600 hover:bg-teal-700"
-                >
-                  {isInviting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  Send Invite
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Users List */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Team Members</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
-                </div>
-              ) : users.length === 0 ? (
-                <div className="text-center py-12">
-                  <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No users yet</p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {users.map(user => (
-                      <TableRow key={user.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                              <User className="w-4 h-4 text-gray-400" />
-                            </div>
-                            <span className="font-medium">{user.full_name || '—'}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{user.email}</TableCell>
-                        <TableCell>
-                          <Badge className={
-                            user.role === 'admin' 
-                              ? 'bg-purple-100 text-purple-700'
-                              : 'bg-blue-100 text-blue-700'
-                          }>
-                            {user.role}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {/* Users */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Users</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {users.length === 0 ? (
+            <div className="text-center py-8">
+              <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500">No users yet</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.map(user => (
+                  <TableRow key={user.id}>
+                    <TableCell className="font-medium">{user.full_name || '—'}</TableCell>
+                    <TableCell>{user.email}</TableCell>
+                    <TableCell>
+                      <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                        {user.role}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Store Dialog */}
       <StoreDialog
         store={editingStore}
-        isOpen={storeDialogOpen}
-        onClose={() => { setStoreDialogOpen(false); setEditingStore(null); }}
+        isOpen={isDialogOpen}
+        onClose={() => { setIsDialogOpen(false); setEditingStore(null); }}
         onSave={saveStore}
         isSaving={isSaving}
       />
@@ -316,7 +265,6 @@ export default function AdminSettings() {
           </DialogHeader>
           <p className="text-gray-600">
             Are you sure you want to delete <strong>{deleteConfirm?.name}</strong>?
-            This may affect products and financial records linked to this store.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
@@ -336,11 +284,7 @@ export default function AdminSettings() {
 }
 
 function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    location: '',
-    contact_info: '',
-  });
+  const [formData, setFormData] = useState({});
 
   useEffect(() => {
     if (store) {
@@ -354,10 +298,6 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      toast.error('Store name is required');
-      return;
-    }
     onSave(formData);
   };
 
@@ -374,7 +314,6 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
               id="name"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="e.g., Ali Textiles"
               required
             />
           </div>
@@ -384,16 +323,14 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
               id="location"
               value={formData.location}
               onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              placeholder="e.g., Market Street, Block A"
             />
           </div>
           <div>
-            <Label htmlFor="contact">Contact Info</Label>
+            <Label htmlFor="contact_info">Contact Info</Label>
             <Input
-              id="contact"
+              id="contact_info"
               value={formData.contact_info}
               onChange={(e) => setFormData({ ...formData, contact_info: e.target.value })}
-              placeholder="e.g., +1 234 567 8900"
             />
           </div>
           <DialogFooter>
