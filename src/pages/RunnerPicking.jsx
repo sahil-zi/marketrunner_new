@@ -1,0 +1,535 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { base44 } from '@/api/base44Client';
+import { Link, useNavigate } from 'react-router-dom';
+import { createPageUrl } from '@/utils';
+import { 
+  ArrowLeft, 
+  Store as StoreIcon,
+  Minus,
+  Plus,
+  Camera,
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  Image as ImageIcon,
+  X,
+  Upload
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+
+export default function RunnerPicking() {
+  const [run, setRun] = useState(null);
+  const [runItems, setRunItems] = useState([]);
+  const [store, setStore] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showConfirmZero, setShowConfirmZero] = useState(null);
+  const [holdProgress, setHoldProgress] = useState(0);
+  const [showComplete, setShowComplete] = useState(false);
+  const [receiptImage, setReceiptImage] = useState(null);
+  const [receiptPreview, setReceiptPreview] = useState(null);
+  const [notes, setNotes] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const holdTimer = useRef(null);
+  const fileInputRef = useRef(null);
+  const navigate = useNavigate();
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const runId = urlParams.get('runId');
+  const storeId = urlParams.get('storeId');
+
+  useEffect(() => {
+    if (runId && storeId) {
+      loadData();
+    }
+    return () => {
+      if (holdTimer.current) clearInterval(holdTimer.current);
+    };
+  }, [runId, storeId]);
+
+  async function loadData() {
+    setIsLoading(true);
+    try {
+      const [runsData, itemsData, storesData] = await Promise.all([
+        base44.entities.Run.list(),
+        base44.entities.RunItem.filter({ run_id: runId }),
+        base44.entities.Store.list(),
+      ]);
+
+      const foundRun = runsData.find(r => r.id === runId);
+      const foundStore = storesData.find(s => s.id === storeId);
+      const storeItems = itemsData.filter(i => i.store_id === storeId);
+
+      setRun(foundRun);
+      setStore(foundStore);
+      setRunItems(storeItems);
+    } catch (error) {
+      console.error('Failed to load data');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // Group items by style
+  const styleGroups = React.useMemo(() => {
+    const groups = {};
+    
+    runItems.forEach(item => {
+      const styleName = item.style_name || 'Unknown';
+      if (!groups[styleName]) {
+        groups[styleName] = {
+          styleName,
+          imageUrl: item.image_url,
+          items: [],
+        };
+      }
+      groups[styleName].items.push(item);
+    });
+
+    return Object.values(groups).sort((a, b) => a.styleName.localeCompare(b.styleName));
+  }, [runItems]);
+
+  // Update picked quantity
+  async function updatePickedQty(item, delta) {
+    const newQty = Math.max(0, Math.min((item.picked_qty || 0) + delta, item.target_qty + 10));
+    
+    try {
+      await base44.entities.RunItem.update(item.id, { picked_qty: newQty });
+      setRunItems(prev => 
+        prev.map(i => i.id === item.id ? { ...i, picked_qty: newQty } : i)
+      );
+    } catch (error) {
+      toast.error('Failed to update');
+    }
+  }
+
+  // Confirm zero quantity
+  const startHold = (item) => {
+    setShowConfirmZero(item);
+    setHoldProgress(0);
+    holdTimer.current = setInterval(() => {
+      setHoldProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(holdTimer.current);
+          confirmZero(item);
+          return 100;
+        }
+        return prev + 5;
+      });
+    }, 100);
+  };
+
+  const cancelHold = () => {
+    if (holdTimer.current) {
+      clearInterval(holdTimer.current);
+    }
+    setHoldProgress(0);
+    setShowConfirmZero(null);
+  };
+
+  const confirmZero = async (item) => {
+    try {
+      await base44.entities.RunItem.update(item.id, { 
+        picked_qty: 0, 
+        status: 'not_found' 
+      });
+      setRunItems(prev => 
+        prev.map(i => i.id === item.id ? { ...i, picked_qty: 0, status: 'not_found' } : i)
+      );
+      toast.success('Marked as unavailable');
+    } catch (error) {
+      toast.error('Failed to update');
+    }
+    setShowConfirmZero(null);
+    setHoldProgress(0);
+  };
+
+  // Handle receipt image
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      toast.error('Only JPEG and PNG images are allowed');
+      return;
+    }
+
+    setReceiptImage(file);
+    setReceiptPreview(URL.createObjectURL(file));
+  };
+
+  // Complete store pickup
+  async function completeStore() {
+    if (!receiptImage) {
+      toast.error('Please upload a receipt photo');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // Upload receipt image
+      const { file_url } = await base44.integrations.Core.UploadFile({ file: receiptImage });
+
+      // Calculate total amount
+      const totalAmount = runItems.reduce((sum, item) => {
+        return sum + ((item.picked_qty || 0) * (item.cost_price || 0));
+      }, 0);
+
+      // Create confirmation
+      await base44.entities.RunConfirmation.create({
+        run_id: runId,
+        store_id: storeId,
+        store_name: store?.name || '',
+        confirmed_at: new Date().toISOString(),
+        receipt_image_url: file_url,
+        total_amount: totalAmount,
+        notes,
+      });
+
+      // Create ledger entry
+      await base44.entities.Ledger.create({
+        store_id: storeId,
+        store_name: store?.name || '',
+        transaction_type: 'debit',
+        amount: totalAmount,
+        date: new Date().toISOString().split('T')[0],
+        notes: `Run #${run.run_number} pickup`,
+        run_number: run.run_number,
+      });
+
+      // Update run items status
+      for (const item of runItems) {
+        const status = item.picked_qty > 0 ? 'picked' : 'not_found';
+        await base44.entities.RunItem.update(item.id, { status });
+      }
+
+      toast.success(`Store confirmed - $${totalAmount.toFixed(2)} recorded`);
+      navigate(createPageUrl(`RunnerPickStore?runId=${runId}`));
+    } catch (error) {
+      toast.error('Failed to complete store');
+      console.error(error);
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  // Calculate progress
+  const totalTarget = runItems.reduce((sum, i) => sum + (i.target_qty || 0), 0);
+  const totalPicked = runItems.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
+  const progress = totalTarget > 0 ? Math.round((totalPicked / totalTarget) * 100) : 0;
+
+  // Check for unpicked items
+  const unpickedItems = runItems.filter(i => i.target_qty > 0 && (i.picked_qty || 0) === 0);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-10 h-10 text-teal-600 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="pb-32">
+      {/* Header */}
+      <div className="bg-white border-b px-4 py-4 sticky top-[60px] z-40">
+        <div className="flex items-center gap-4">
+          <Link to={createPageUrl(`RunnerPickStore?runId=${runId}`)}>
+            <Button variant="ghost" size="icon" className="shrink-0">
+              <ArrowLeft className="w-6 h-6" />
+            </Button>
+          </Link>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <StoreIcon className="w-5 h-5 text-teal-600" />
+              <h1 className="text-xl font-bold text-gray-900">{store?.name || 'Store'}</h1>
+            </div>
+            <p className="text-gray-500 text-sm">
+              {totalPicked} / {totalTarget} items picked
+            </p>
+          </div>
+        </div>
+        <Progress value={progress} className="mt-3 h-2" />
+      </div>
+
+      {/* Items by Style */}
+      <div className="p-4 space-y-6">
+        {styleGroups.map(group => (
+          <Card key={group.styleName} className="overflow-hidden">
+            {/* Style Header */}
+            <div className="bg-gray-50 p-4 flex gap-4">
+              {group.imageUrl ? (
+                <img 
+                  src={group.imageUrl}
+                  alt={group.styleName}
+                  className="w-24 h-24 object-cover rounded-xl"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              ) : (
+                <div className="w-24 h-24 bg-gray-200 rounded-xl flex items-center justify-center">
+                  <ImageIcon className="w-10 h-10 text-gray-400" />
+                </div>
+              )}
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-gray-900">{group.styleName}</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {group.items.length} size{group.items.length > 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+
+            {/* Size Items */}
+            <CardContent className="p-0 divide-y">
+              {group.items.map(item => {
+                const isComplete = item.picked_qty >= item.target_qty;
+                const isPartial = item.picked_qty > 0 && item.picked_qty < item.target_qty;
+                const isZero = item.target_qty > 0 && (item.picked_qty || 0) === 0;
+
+                return (
+                  <div 
+                    key={item.id}
+                    className={`p-4 flex items-center justify-between ${
+                      isComplete ? 'bg-green-50' : isZero ? 'bg-red-50' : ''
+                    }`}
+                  >
+                    <div>
+                      <p className="text-lg font-semibold text-gray-900">
+                        Size {item.size || 'N/A'}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Need: <span className="font-bold text-gray-700">{item.target_qty}</span>
+                      </p>
+                    </div>
+
+                    {/* Quantity Controls */}
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="w-12 h-12 rounded-xl"
+                        onClick={() => {
+                          if ((item.picked_qty || 0) === 1 && item.target_qty > 0) {
+                            startHold(item);
+                          } else {
+                            updatePickedQty(item, -1);
+                          }
+                        }}
+                        disabled={isSaving || (item.picked_qty || 0) === 0}
+                      >
+                        <Minus className="w-6 h-6" />
+                      </Button>
+                      
+                      <span className={`text-3xl font-bold w-12 text-center ${
+                        isComplete ? 'text-green-600' : isZero ? 'text-red-600' : 'text-gray-900'
+                      }`}>
+                        {item.picked_qty || 0}
+                      </span>
+                      
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="w-12 h-12 rounded-xl"
+                        onClick={() => updatePickedQty(item, 1)}
+                        disabled={isSaving}
+                      >
+                        <Plus className="w-6 h-6" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Fixed Bottom Button */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-lg">
+        <Button 
+          onClick={() => setShowComplete(true)}
+          className="w-full h-14 text-lg font-bold bg-teal-600 hover:bg-teal-700"
+        >
+          <CheckCircle2 className="w-6 h-6 mr-2" />
+          Finish Store Pickup
+        </Button>
+      </div>
+
+      {/* Confirm Zero Dialog */}
+      <Dialog open={!!showConfirmZero} onOpenChange={cancelHold}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="w-6 h-6" />
+              Confirm Unavailable
+            </DialogTitle>
+            <DialogDescription>
+              This size was NOT found at the store.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-center text-gray-600 mb-4">
+              <strong>{showConfirmZero?.style_name}</strong><br />
+              Size: {showConfirmZero?.size}
+            </p>
+            <div className="relative">
+              <Button 
+                className="w-full h-16 bg-amber-500 hover:bg-amber-600"
+                onMouseDown={() => startHold(showConfirmZero)}
+                onMouseUp={cancelHold}
+                onMouseLeave={cancelHold}
+                onTouchStart={() => startHold(showConfirmZero)}
+                onTouchEnd={cancelHold}
+              >
+                HOLD TO CONFIRM
+              </Button>
+              <div 
+                className="absolute bottom-0 left-0 h-1 bg-amber-700 transition-all duration-100"
+                style={{ width: `${holdProgress}%` }}
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Complete Store Dialog */}
+      <Dialog open={showComplete} onOpenChange={setShowComplete}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Complete Store Pickup</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Warnings */}
+            {unpickedItems.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <p className="font-medium text-amber-800 mb-2">
+                  <AlertTriangle className="w-4 h-4 inline mr-1" />
+                  {unpickedItems.length} items not picked:
+                </p>
+                <ul className="text-sm text-amber-700 space-y-1">
+                  {unpickedItems.slice(0, 5).map(item => (
+                    <li key={item.id}>• {item.style_name} - Size {item.size}</li>
+                  ))}
+                  {unpickedItems.length > 5 && (
+                    <li>• ...and {unpickedItems.length - 5} more</li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {/* Summary */}
+            <div className="bg-gray-50 rounded-xl p-4">
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Items Picked:</span>
+                <span className="font-bold">{totalPicked} / {totalTarget}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Estimated Total:</span>
+                <span className="font-bold text-teal-600">
+                  ${runItems.reduce((sum, item) => 
+                    sum + ((item.picked_qty || 0) * (item.cost_price || 0)), 0
+                  ).toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Receipt Upload */}
+            <div>
+              <p className="font-medium text-gray-700 mb-2">Upload Receipt Photo *</p>
+              <input 
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={handleImageSelect}
+                ref={fileInputRef}
+                className="hidden"
+              />
+              
+              {receiptPreview ? (
+                <div className="relative">
+                  <img 
+                    src={receiptPreview}
+                    alt="Receipt"
+                    className="w-full h-48 object-cover rounded-xl"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-2 right-2"
+                    onClick={() => {
+                      setReceiptImage(null);
+                      setReceiptPreview(null);
+                    }}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full h-32 border-dashed"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className="text-center">
+                    <Camera className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                    <span className="text-gray-600">Take Photo or Upload</span>
+                  </div>
+                </Button>
+              )}
+            </div>
+
+            {/* Notes */}
+            <div>
+              <p className="font-medium text-gray-700 mb-2">Notes (optional)</p>
+              <Textarea
+                placeholder="Add any notes..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowComplete(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={completeStore}
+              disabled={isUploading || !receiptImage}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Confirm & Submit
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
