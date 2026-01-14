@@ -7,7 +7,10 @@ import {
   Package,
   Calendar,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Download,
+  MoreHorizontal,
+  XCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +34,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import CSVUploader from '@/components/admin/CSVUploader';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
@@ -243,6 +252,46 @@ export default function Orders() {
     return product ? `${product.style_name} - ${product.size || ''}` : barcode;
   };
 
+  // Export orders to CSV
+  function exportOrders() {
+    const headers = ['Platform', 'OrderID', 'OrderDate', 'Barcode', 'ProductName', 'Quantity', 'Status'];
+    const rows = ordersWithItems.flatMap(order => 
+      order.items.map(item => [
+        order.platform_name,
+        order.platform_order_id,
+        order.order_timestamp ? new Date(order.order_timestamp).toISOString().split('T')[0] : '',
+        item.barcode,
+        getProductName(item.barcode),
+        item.quantity,
+        item.status,
+      ])
+    );
+    
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `orders_export_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Orders exported');
+  }
+
+  // Cancel order item
+  async function cancelOrderItem(orderItemId, reason) {
+    try {
+      await base44.entities.OrderItem.update(orderItemId, { 
+        status: 'cancelled',
+        notes: `Cancelled: ${reason}`
+      });
+      toast.success('Order item cancelled');
+      loadData();
+    } catch (error) {
+      toast.error('Failed to cancel order item');
+    }
+  }
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -291,11 +340,19 @@ export default function Orders() {
                     <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="assigned_to_run">Assigned to Run</SelectItem>
                     <SelectItem value="picked">Picked</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                    </Select>
+                    <Button
+                    variant="outline"
+                    onClick={exportOrders}
+                    className="shrink-0"
+                    >
+                    Export Orders
+                    </Button>
+                    </div>
+                    </CardContent>
+                    </Card>
 
           {/* Orders Table */}
           <Card>
@@ -320,7 +377,8 @@ export default function Orders() {
                         <TableHead>Items</TableHead>
                         <TableHead>Total Qty</TableHead>
                         <TableHead>Status</TableHead>
-                      </TableRow>
+                        <TableHead className="w-12"></TableHead>
+                        </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredOrders.map(order => (
@@ -366,11 +424,48 @@ export default function Orders() {
                                 In Progress
                               </Badge>
                             )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                            </TableCell>
+                            <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {order.items.filter(i => i.status === 'pending').length > 0 && (
+                                  <>
+                                    <DropdownMenuItem 
+                                      onClick={() => {
+                                        order.items
+                                          .filter(i => i.status === 'pending')
+                                          .forEach(item => cancelOrderItem(item.id, 'oos'));
+                                      }}
+                                      className="text-red-600"
+                                    >
+                                      <XCircle className="w-4 h-4 mr-2" />
+                                      Cancel (Out of Stock)
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem 
+                                      onClick={() => {
+                                        order.items
+                                          .filter(i => i.status === 'pending')
+                                          .forEach(item => cancelOrderItem(item.id, 'qc_fail'));
+                                      }}
+                                      className="text-red-600"
+                                    >
+                                      <XCircle className="w-4 h-4 mr-2" />
+                                      Cancel (QC Fail)
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            </TableCell>
+                            </TableRow>
+                            ))}
+                            </TableBody>
+                            </Table>
                 </div>
               )}
             </CardContent>
@@ -380,7 +475,7 @@ export default function Orders() {
         <TabsContent value="upload">
           <CSVUploader
             title="Import Orders CSV"
-            description="Import orders from marketplaces. Columns: Platform, OrderID, OrderDate, Barcode, Quantity"
+            description="Import orders from marketplaces. Columns: Platform, OrderID, OrderDate (YYYY-MM-DD format), Barcode, Quantity"
             expectedColumns={['Platform', 'OrderID', 'OrderDate', 'Barcode', 'Quantity']}
             onValidate={validateOrders}
             onConfirm={importOrders}

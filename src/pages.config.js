@@ -1,31 +1,31 @@
+import AdminSettings from './pages/AdminSettings';
 import Dashboard from './pages/Dashboard';
+import Financials from './pages/Financials';
 import Inventory from './pages/Inventory';
 import Orders from './pages/Orders';
-import Runs from './pages/Runs';
+import PrintLabels from './pages/PrintLabels';
 import RunDetails from './pages/RunDetails';
-import Financials from './pages/Financials';
-import AdminSettings from './pages/AdminSettings';
-import RunnerLogin from './pages/RunnerLogin';
 import RunnerHome from './pages/RunnerHome';
+import RunnerLogin from './pages/RunnerLogin';
 import RunnerPickStore from './pages/RunnerPickStore';
 import RunnerPicking from './pages/RunnerPicking';
-import PrintLabels from './pages/PrintLabels';
+import Runs from './pages/Runs';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
+    "AdminSettings": AdminSettings,
     "Dashboard": Dashboard,
+    "Financials": Financials,
     "Inventory": Inventory,
     "Orders": Orders,
-    "Runs": Runs,
+    "PrintLabels": PrintLabels,
     "RunDetails": RunDetails,
-    "Financials": Financials,
-    "AdminSettings": AdminSettings,
-    "RunnerLogin": RunnerLogin,
     "RunnerHome": RunnerHome,
+    "RunnerLogin": RunnerLogin,
     "RunnerPickStore": RunnerPickStore,
     "RunnerPicking": RunnerPicking,
-    "PrintLabels": PrintLabels,
+    "Runs": Runs,
 }
 
 export const pagesConfig = {

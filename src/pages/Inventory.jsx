@@ -10,7 +10,8 @@ import {
   Upload,
   X,
   Loader2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -223,6 +224,12 @@ export default function Inventory() {
 
   // Save product (create or update)
   async function saveProduct(productData) {
+    // Validate store exists
+    if (productData.store_id && !stores.find(s => s.id === productData.store_id)) {
+      toast.error('Selected store does not exist');
+      return;
+    }
+
     setIsSaving(true);
     try {
       if (editingProduct?.id) {
@@ -258,6 +265,35 @@ export default function Inventory() {
     const store = stores.find(s => s.id === storeId);
     return store?.name || '—';
   };
+
+  // Export products to CSV
+  function exportProducts() {
+    const headers = ['Barcode', 'Style', 'Size', 'Color', 'ImageURL', 'Cost', 'RRP', 'Family', 'Category', 'SubCat', 'Occasion', 'StoreName'];
+    const rows = products.map(p => [
+      p.barcode,
+      p.style_name,
+      p.size || '',
+      p.color || '',
+      p.image_url || '',
+      p.cost_price || '',
+      p.rrp || '',
+      p.family || '',
+      p.category || '',
+      p.sub_category || '',
+      p.occasion || '',
+      getStoreName(p.store_id),
+    ]);
+    
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `products_export_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Products exported');
+  }
 
   return (
     <div className="space-y-8">
@@ -308,19 +344,26 @@ export default function Inventory() {
                   </SelectContent>
                 </Select>
                 <Select value={filterCategory} onValueChange={setFilterCategory}>
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue placeholder="Filter by category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map(cat => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
+                   <SelectTrigger className="w-full sm:w-48">
+                     <SelectValue placeholder="Filter by category" />
+                   </SelectTrigger>
+                   <SelectContent>
+                     <SelectItem value="all">All Categories</SelectItem>
+                     {categories.map(cat => (
+                       <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                     ))}
+                   </SelectContent>
+                 </Select>
+                 <Button
+                   variant="outline"
+                   onClick={exportProducts}
+                   className="shrink-0"
+                 >
+                   Export SKUs
+                 </Button>
+                </div>
+                </CardContent>
+                </Card>
 
           {/* Products Table */}
           <Card>
@@ -558,10 +601,11 @@ function ProductDialog({ product, stores, isOpen, onClose, onSave, isSaving }) {
               />
             </div>
             <div>
-              <Label htmlFor="store">Store</Label>
+              <Label htmlFor="store">Store *</Label>
               <Select 
                 value={formData.store_id} 
                 onValueChange={(v) => setFormData({ ...formData, store_id: v })}
+                required
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select store" />
