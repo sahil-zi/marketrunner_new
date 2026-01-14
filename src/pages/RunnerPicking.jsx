@@ -43,6 +43,7 @@ export default function RunnerPicking() {
   const [receiptPreview, setReceiptPreview] = useState(null);
   const [notes, setNotes] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [viewImage, setViewImage] = useState(null);
   const holdTimer = useRef(null);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
@@ -215,10 +216,20 @@ export default function RunnerPicking() {
         run_number: run.run_number,
       });
 
-      // Update run items status
+      // Update run items status and corresponding order items
       for (const item of runItems) {
         const status = item.picked_qty > 0 ? 'picked' : 'not_found';
         await base44.entities.RunItem.update(item.id, { status });
+        
+        // Also update all related OrderItems to 'picked'
+        const relatedOrderItems = await base44.entities.OrderItem.filter({ 
+          barcode: item.barcode,
+          run_id: runId 
+        });
+        
+        for (const orderItem of relatedOrderItems) {
+          await base44.entities.OrderItem.update(orderItem.id, { status });
+        }
       }
 
       toast.success(`Store confirmed - $${totalAmount.toFixed(2)} recorded`);
@@ -285,7 +296,8 @@ export default function RunnerPicking() {
                 <img 
                   src={group.imageUrl}
                   alt={group.styleName}
-                  className="w-24 h-24 object-cover rounded-xl"
+                  className="w-24 h-24 object-cover rounded-xl cursor-pointer"
+                  onClick={() => setViewImage(group.imageUrl)}
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
               ) : (
@@ -533,6 +545,22 @@ export default function RunnerPicking() {
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Image Viewer Dialog */}
+      <Dialog open={!!viewImage} onOpenChange={() => setViewImage(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Product Image</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-4">
+            <img 
+              src={viewImage}
+              alt="Product"
+              className="max-w-full max-h-[70vh] object-contain rounded-lg"
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </div>
