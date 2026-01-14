@@ -26,7 +26,19 @@ export default function RunnerHome() {
 
   useEffect(() => {
     loadData();
-  }, []);
+
+    // Subscribe to runs updates for real-time notifications
+    const unsubscribe = base44.entities.Run.subscribe((event) => {
+      if (event.type === 'create' || event.type === 'update') {
+        const run = event.data;
+        if (run.status === 'active' && (!run.runner_id || run.runner_id === user?.id)) {
+          loadData();
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   async function loadData() {
     setIsLoading(true);
