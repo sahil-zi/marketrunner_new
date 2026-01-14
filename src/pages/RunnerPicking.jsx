@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+
 import {
   Dialog,
   DialogContent,
@@ -267,7 +267,12 @@ export default function RunnerPicking() {
             </p>
           </div>
         </div>
-        <Progress value={progress} className="mt-3 h-2" />
+        <div className="w-full bg-gray-200 rounded-full h-2 mt-3 overflow-hidden">
+          <div 
+            className="bg-teal-600 h-full transition-all duration-300"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
       </div>
 
       {/* Items by Style */}

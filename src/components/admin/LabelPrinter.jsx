@@ -21,7 +21,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 
 export default function LabelPrinter({ products, stores }) {
@@ -202,7 +201,7 @@ export default function LabelPrinter({ products, stores }) {
               </div>
 
               {/* Size Selection */}
-              <ScrollArea className="max-h-64">
+              <div className="max-h-64 overflow-y-auto">
                 <div className="space-y-3">
                   {selectedStyle.items.map(item => (
                     <div 
@@ -238,7 +237,7 @@ export default function LabelPrinter({ products, stores }) {
                     </div>
                   ))}
                 </div>
-              </ScrollArea>
+              </div>
 
               {/* Total */}
               <div className="flex justify-between items-center p-3 bg-teal-50 rounded-xl">

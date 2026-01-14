@@ -25,7 +25,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 
@@ -215,7 +214,12 @@ Run: #${run.run_number}
               <span className="text-gray-500">Overall Progress</span>
               <span className="font-medium">{progress.percentage}%</span>
             </div>
-            <Progress value={progress.percentage} className="h-2" />
+            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div 
+                className="bg-teal-600 h-full transition-all duration-300"
+                style={{ width: `${progress.percentage}%` }}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

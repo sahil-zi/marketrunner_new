@@ -16,7 +16,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 
 function StatCard({ title, value, icon: Icon, trend, color, isLoading }) {
   const colorClasses = {
@@ -33,7 +32,7 @@ function StatCard({ title, value, icon: Icon, trend, color, isLoading }) {
           <div>
             <p className="text-sm font-medium text-gray-500">{title}</p>
             {isLoading ? (
-              <Skeleton className="h-8 w-24 mt-2" />
+              <div className="h-8 w-24 mt-2 bg-gray-200 animate-pulse rounded" />
             ) : (
               <p className="text-3xl font-bold text-gray-900 mt-2">{value}</p>
             )}
@@ -227,11 +226,11 @@ export default function Dashboard() {
         <CardContent className="space-y-3">
           {isLoading ? (
             Array(3).fill(0).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
-                <Skeleton className="w-12 h-12 rounded-xl" />
+              <div key={i} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl animate-pulse">
+                <div className="w-12 h-12 bg-gray-200 rounded-xl" />
                 <div className="flex-1">
-                  <Skeleton className="h-5 w-24" />
-                  <Skeleton className="h-4 w-32 mt-2" />
+                  <div className="h-5 w-24 bg-gray-200 rounded" />
+                  <div className="h-4 w-32 bg-gray-200 rounded mt-2" />
                 </div>
               </div>
             ))

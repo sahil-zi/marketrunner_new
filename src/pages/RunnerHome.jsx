@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+
 
 export default function RunnerHome() {
   const [user, setUser] = useState(null);
@@ -166,10 +166,12 @@ export default function RunnerHome() {
                           </Badge>
                         )}
                       </div>
-                      <Progress 
-                        value={progress.percentage} 
-                        className={`h-3 ${isComplete ? '[&>div]:bg-green-500' : ''}`}
-                      />
+                      <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-300 ${isComplete ? 'bg-green-500' : 'bg-teal-600'}`}
+                          style={{ width: `${progress.percentage}%` }}
+                        />
+                      </div>
                     </div>
 
                     {/* Stats */}

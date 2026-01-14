@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
 
 // Sanitize CSV cells to prevent formula injection
 function sanitizeCell(value) {
@@ -235,7 +235,7 @@ export default function CSVUploader({
             {parsedData && (
               <div>
                 <h4 className="font-medium text-gray-900 mb-3">Preview (first 10 rows)</h4>
-                <ScrollArea className="h-64 rounded-lg border">
+                <div className="h-64 overflow-auto rounded-lg border">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -260,7 +260,7 @@ export default function CSVUploader({
                       ))}
                     </TableBody>
                   </Table>
-                </ScrollArea>
+                </div>
               </div>
             )}
 
