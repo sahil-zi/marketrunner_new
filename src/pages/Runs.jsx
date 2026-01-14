@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import OrderSelector from '@/components/admin/OrderSelector';
 
 export default function Runs() {
   const [runs, setRuns] = useState([]);
@@ -46,6 +47,7 @@ export default function Runs() {
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [assignDialog, setAssignDialog] = useState(null);
   const [selectedRunner, setSelectedRunner] = useState('');
+  const [selectedOrderItems, setSelectedOrderItems] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -100,8 +102,10 @@ export default function Runs() {
 
   // Generate new run
   async function generateRun() {
-    if (pendingItems.length === 0) {
-      toast.error('No pending order items to consolidate');
+    const itemsToUse = selectedOrderItems.length > 0 ? selectedOrderItems : pendingItems;
+    
+    if (itemsToUse.length === 0) {
+      toast.error('No order items selected');
       return;
     }
 
@@ -112,7 +116,7 @@ export default function Runs() {
 
       // Aggregate items by barcode
       const aggregatedItems = {};
-      pendingItems.forEach(item => {
+      itemsToUse.forEach(item => {
         if (!aggregatedItems[item.barcode]) {
           aggregatedItems[item.barcode] = {
             barcode: item.barcode,
@@ -185,6 +189,7 @@ export default function Runs() {
 
       toast.success(`Run #${runNumber} created with ${totalItems} items from ${uniqueStyles.size} styles`);
       setShowGenerateDialog(false);
+      setSelectedOrderItems([]);
       loadData();
     } catch (error) {
       toast.error('Failed to generate run');
@@ -374,31 +379,27 @@ export default function Runs() {
 
       {/* Generate Run Dialog */}
       <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>Generate New Run</DialogTitle>
             <DialogDescription>
-              This will consolidate all pending order items into a new pickup run.
+              Select the order items to include in this run. Leave unselected to use all pending items.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Total Items:</span>
-                <span className="font-medium">{pendingStats.totalItems}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Unique Styles:</span>
-                <span className="font-medium">{pendingStats.uniqueStyles}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Stores:</span>
-                <span className="font-medium">{pendingStats.storeCount}</span>
-              </div>
-            </div>
+            <OrderSelector
+              orderItems={pendingItems}
+              products={products}
+              stores={stores}
+              selectedItems={selectedOrderItems}
+              onSelectionChange={setSelectedOrderItems}
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>
+            <Button variant="outline" onClick={() => {
+              setShowGenerateDialog(false);
+              setSelectedOrderItems([]);
+            }}>
               Cancel
             </Button>
             <Button 
@@ -412,7 +413,7 @@ export default function Runs() {
                   Generating...
                 </>
               ) : (
-                'Generate Run'
+                `Generate Run (${selectedOrderItems.length || pendingItems.length} items)`
               )}
             </Button>
           </DialogFooter>
