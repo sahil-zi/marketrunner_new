@@ -266,7 +266,12 @@ Run: #${run.run_number}
                       </Badge>
                     )}
                   </div>
-                  <Progress value={storeProgress} className="h-1.5 mt-4" />
+                  <div className="w-full bg-gray-200 rounded-full h-1.5 mt-4 overflow-hidden">
+                    <div 
+                      className="bg-teal-600 h-full transition-all duration-300"
+                      style={{ width: `${storeProgress}%` }}
+                    />
+                  </div>
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="space-y-3">
