@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
+import { format } from 'date-fns';
 import { 
   DollarSign, 
   Search, 
@@ -10,7 +11,8 @@ import {
   Calendar,
   Receipt,
   Loader2,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,7 +43,10 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarUI } from '@/components/ui/calendar';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 export default function Financials() {
   const [ledger, setLedger] = useState([]);
@@ -50,6 +55,8 @@ export default function Financials() {
   const [isLoading, setIsLoading] = useState(true);
   const [filterStore, setFilterStore] = useState('all');
   const [filterType, setFilterType] = useState('all');
+  const [filterDateFrom, setFilterDateFrom] = useState(null);
+  const [filterDateTo, setFilterDateTo] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -126,7 +133,12 @@ export default function Financials() {
   const filteredLedger = ledger.filter(entry => {
     const matchesStore = filterStore === 'all' || entry.store_id === filterStore;
     const matchesType = filterType === 'all' || entry.transaction_type === filterType;
-    return matchesStore && matchesType;
+    
+    const entryDate = new Date(entry.date);
+    const matchesDateFrom = !filterDateFrom || entryDate >= filterDateFrom;
+    const matchesDateTo = !filterDateTo || entryDate <= filterDateTo;
+
+    return matchesStore && matchesType && matchesDateFrom && matchesDateTo;
   });
 
   // Add ledger entry
@@ -166,6 +178,32 @@ export default function Financials() {
   }
 
   const getConfirmation = (id) => confirmations.find(c => c.id === id);
+
+  function exportToCSV() {
+    const headers = ["Date", "Store", "Type", "Amount", "Run #", "Notes", "Receipt URL"];
+    const rows = filteredLedger.map(entry => [
+      entry.date,
+      entry.store_name,
+      entry.transaction_type,
+      entry.amount?.toFixed(2),
+      entry.run_number || '',
+      (entry.notes || '').replace(/,/g, ';'),
+      getConfirmation(entry.run_confirmation_id)?.receipt_image_url || '',
+    ]);
+    
+    const csvContent = [headers, ...rows]
+      .map(e => e.map(cell => `"${cell}"`).join(","))
+      .join("\n");
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `ledger_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Ledger exported successfully');
+  }
 
   return (
     <div className="space-y-8">
@@ -227,7 +265,26 @@ export default function Financials() {
         </TabsList>
 
         {/* Store Balances */}
-        <TabsContent value="balances">
+        <TabsContent value="balances" className="space-y-6">
+          {/* Store Filter */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <Select value={filterStore} onValueChange={setFilterStore}>
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue placeholder="Filter by store" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Stores</SelectItem>
+                    {stores.map(store => (
+                      <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
@@ -241,7 +298,9 @@ export default function Financials() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {storeBalances.map(store => (
+              {storeBalances
+                .filter(store => filterStore === 'all' || store.storeId === filterStore)
+                .map(store => (
                 <Card key={store.storeId} className={
                   store.balance > 0 
                     ? 'border-green-200' 
@@ -296,7 +355,7 @@ export default function Financials() {
           {/* Filters */}
           <Card>
             <CardContent className="p-4">
-              <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
                 <Select value={filterStore} onValueChange={setFilterStore}>
                   <SelectTrigger className="w-full sm:w-48">
                     <SelectValue placeholder="Filter by store" />
@@ -318,9 +377,81 @@ export default function Financials() {
                     <SelectItem value="credit">Credits</SelectItem>
                   </SelectContent>
                 </Select>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full sm:w-[200px] justify-start text-left font-normal",
+                        !filterDateFrom && "text-muted-foreground"
+                      )}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {filterDateFrom ? format(filterDateFrom, "PPP") : <span>From Date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarUI
+                      mode="single"
+                      selected={filterDateFrom}
+                      onSelect={setFilterDateFrom}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full sm:w-[200px] justify-start text-left font-normal",
+                        !filterDateTo && "text-muted-foreground"
+                      )}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {filterDateTo ? format(filterDateTo, "PPP") : <span>To Date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarUI
+                      mode="single"
+                      selected={filterDateTo}
+                      onSelect={setFilterDateTo}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+
+                {(filterDateFrom || filterDateTo) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setFilterDateFrom(null);
+                      setFilterDateTo(null);
+                    }}
+                    className="w-full sm:w-fit"
+                  >
+                    <X className="w-4 h-4 mr-2" />
+                    Clear Dates
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
+
+          {/* Export Button */}
+          <div className="flex justify-end">
+            <Button 
+              onClick={exportToCSV}
+              disabled={filteredLedger.length === 0}
+              className="bg-gray-800 hover:bg-gray-900 text-white"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export to CSV
+            </Button>
+          </div>
 
           {/* Ledger Table */}
           <Card>
