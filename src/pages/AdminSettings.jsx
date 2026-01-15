@@ -212,8 +212,9 @@ export default function AdminSettings() {
 
       {/* Users */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Users</CardTitle>
+          <InviteUserButton onSuccess={loadData} />
         </CardHeader>
         <CardContent>
           {users.length === 0 ? (
@@ -345,5 +346,88 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function InviteUserButton({ onSuccess }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('user');
+  const [isInviting, setIsInviting] = useState(false);
+
+  async function handleInvite(e) {
+    e.preventDefault();
+    if (!email) {
+      toast.error('Please enter an email');
+      return;
+    }
+
+    setIsInviting(true);
+    try {
+      await base44.users.inviteUser(email, role);
+      toast.success('User invited successfully');
+      setIsOpen(false);
+      setEmail('');
+      setRole('user');
+      onSuccess();
+    } catch (error) {
+      toast.error('Failed to invite user');
+    } finally {
+      setIsInviting(false);
+    }
+  }
+
+  return (
+    <>
+      <Button 
+        onClick={() => setIsOpen(true)}
+        className="bg-teal-600 hover:bg-teal-700"
+      >
+        <Plus className="w-4 h-4 mr-2" />
+        Invite User
+      </Button>
+
+      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite User</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleInvite} className="space-y-4">
+            <div>
+              <Label htmlFor="email">Email Address *</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="role">Role *</Label>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">Runner</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isInviting} className="bg-teal-600 hover:bg-teal-700">
+                {isInviting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Send Invitation
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -67,7 +67,7 @@ export default function Runs() {
       setPendingItems(orderItemsData);
       setProducts(productsData);
       setStores(storesData);
-      setUsers(usersData.filter(u => u.role === 'runner' || u.role === 'admin'));
+      setUsers(usersData);
     } catch (error) {
       toast.error('Failed to load data');
     } finally {

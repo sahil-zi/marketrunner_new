@@ -12,7 +12,8 @@ import {
   Clock,
   AlertCircle,
   Loader2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Edit
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
