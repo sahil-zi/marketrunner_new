@@ -35,15 +35,19 @@ export default function RunnerHome() {
       setUser(currentUser);
 
       const [runsData, runItemsData, confirmationsData] = await Promise.all([
-        base44.entities.Run.filter({ status: 'active' }),
+        base44.entities.Run.list(),
         base44.entities.RunItem.list(),
         base44.entities.RunConfirmation.list(),
       ]);
 
-      // Filter runs for this runner or unassigned
-      const myRuns = runsData.filter(
-        r => !r.runner_id || r.runner_id === currentUser.id
-      );
+      // Filter runs for this runner that are active or recently completed
+      const myRuns = runsData.filter(r => {
+        const isAssignedToMe = !r.runner_id || r.runner_id === currentUser.id;
+        const isActiveOrRecent = r.status === 'active' || 
+          (r.status === 'completed' && r.completed_at && 
+           new Date() - new Date(r.completed_at) < 24 * 60 * 60 * 1000);
+        return isAssignedToMe && isActiveOrRecent;
+      });
 
       setRuns(myRuns);
       setRunItems(runItemsData);
@@ -56,19 +60,21 @@ export default function RunnerHome() {
   }
 
   // Calculate run progress
-  const getRunProgress = (runId) => {
+  const getRunProgress = (runId, run) => {
     const items = runItems.filter(i => i.run_id === runId);
     const runConfirmations = confirmations.filter(c => c.run_id === runId);
     
-    const uniqueStores = [...new Set(items.map(i => i.store_id))];
-    const confirmedStores = runConfirmations.map(c => c.store_id);
+    const uniqueStores = [...new Set(items.map(i => i.store_id).filter(Boolean))];
+    const confirmedStoreIds = new Set(runConfirmations.map(c => c.store_id));
+    const completedStores = uniqueStores.filter(sid => confirmedStoreIds.has(sid)).length;
     
     return {
       totalStores: uniqueStores.length,
-      completedStores: confirmedStores.length,
+      completedStores: completedStores,
       percentage: uniqueStores.length > 0 
-        ? Math.round((confirmedStores.length / uniqueStores.length) * 100) 
+        ? Math.round((completedStores / uniqueStores.length) * 100) 
         : 0,
+      isComplete: run.status === 'completed' || (completedStores === uniqueStores.length && uniqueStores.length > 0),
     };
   };
 
@@ -114,8 +120,8 @@ export default function RunnerHome() {
       ) : (
         <div className="space-y-4">
           {runs.map(run => {
-            const progress = getRunProgress(run.id);
-            const isComplete = progress.completedStores === progress.totalStores && progress.totalStores > 0;
+            const progress = getRunProgress(run.id, run);
+            const isComplete = progress.isComplete;
 
             return (
               <Link 

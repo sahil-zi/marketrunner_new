@@ -242,6 +242,7 @@ export default function Orders() {
       pending: 'bg-amber-100 text-amber-700',
       assigned_to_run: 'bg-blue-100 text-blue-700',
       picked: 'bg-green-100 text-green-700',
+      shipped: 'bg-purple-100 text-purple-700',
       cancelled: 'bg-gray-100 text-gray-700',
     };
     return <Badge className={colors[status] || colors.pending}>{status}</Badge>;
@@ -340,6 +341,7 @@ export default function Orders() {
                     <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="assigned_to_run">Assigned to Run</SelectItem>
                     <SelectItem value="picked">Picked</SelectItem>
+                    <SelectItem value="shipped">Shipped</SelectItem>
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                     </Select>
@@ -409,10 +411,15 @@ export default function Orders() {
                           </TableCell>
                           <TableCell className="font-medium">{order.totalQty}</TableCell>
                           <TableCell>
-                            {order.items.every(i => i.status === 'picked') ? (
-                              <Badge className="bg-green-100 text-green-700">
+                            {order.items.every(i => i.status === 'shipped') ? (
+                              <Badge className="bg-purple-100 text-purple-700">
                                 <CheckCircle2 className="w-3 h-3 mr-1" />
-                                Complete
+                                Shipped
+                              </Badge>
+                            ) : order.items.every(i => i.status === 'picked') ? (
+                              <Badge className="bg-green-100 text-green-700">
+                                <Package className="w-3 h-3 mr-1" />
+                                Picked
                               </Badge>
                             ) : order.items.some(i => i.status === 'pending') ? (
                               <Badge className="bg-amber-100 text-amber-700">
@@ -433,6 +440,27 @@ export default function Orders() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
+                                {order.items.every(i => i.status === 'picked') && (
+                                  <DropdownMenuItem 
+                                    onClick={async () => {
+                                      try {
+                                        await Promise.all(
+                                          order.items.map(item => 
+                                            base44.entities.OrderItem.update(item.id, { status: 'shipped' })
+                                          )
+                                        );
+                                        toast.success('Order marked as shipped');
+                                        loadData();
+                                      } catch (error) {
+                                        toast.error('Failed to mark as shipped');
+                                      }
+                                    }}
+                                    className="text-purple-600"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                                    Mark as Shipped
+                                  </DropdownMenuItem>
+                                )}
                                 {order.items.filter(i => i.status === 'pending').length > 0 && (
                                   <>
                                     <DropdownMenuItem 
