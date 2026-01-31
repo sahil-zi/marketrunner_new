@@ -444,12 +444,25 @@ export default function Orders() {
                                   <DropdownMenuItem 
                                     onClick={async () => {
                                       try {
+                                        // Update order items to shipped
                                         await Promise.all(
                                           order.items.map(item => 
                                             base44.entities.OrderItem.update(item.id, { status: 'shipped' })
                                           )
                                         );
-                                        toast.success('Order marked as shipped');
+                                        
+                                        // Update inventory for each item
+                                        for (const item of order.items) {
+                                          const product = products.find(p => p.barcode === item.barcode);
+                                          if (product) {
+                                            const newInventory = (product.inventory || 0) - item.quantity;
+                                            await base44.entities.ProductCatalog.update(product.id, {
+                                              inventory: Math.max(0, newInventory)
+                                            });
+                                          }
+                                        }
+                                        
+                                        toast.success('Order marked as shipped, inventory updated');
                                         loadData();
                                       } catch (error) {
                                         toast.error('Failed to mark as shipped');

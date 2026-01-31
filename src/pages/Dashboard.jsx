@@ -128,7 +128,7 @@ export default function Dashboard() {
         }
       });
 
-      const activeRuns = runs.filter(r => r.status === 'active').length;
+      const activeRuns = runs.filter(r => r.status === 'active' || r.status === 'completed').length;
 
       setStats({
         totalProducts: products.length,

@@ -136,7 +136,14 @@ export default function Financials() {
     
     const entryDate = new Date(entry.date);
     const matchesDateFrom = !filterDateFrom || entryDate >= filterDateFrom;
-    const matchesDateTo = !filterDateTo || entryDate <= filterDateTo;
+    
+    // Include the entire "To" date by comparing to the end of that day
+    let matchesDateTo = true;
+    if (filterDateTo) {
+      const endOfToDate = new Date(filterDateTo);
+      endOfToDate.setHours(23, 59, 59, 999);
+      matchesDateTo = entryDate <= endOfToDate;
+    }
 
     return matchesStore && matchesType && matchesDateFrom && matchesDateTo;
   });

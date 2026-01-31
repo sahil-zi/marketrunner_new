@@ -388,6 +388,7 @@ export default function Inventory() {
                         <TableHead>Size</TableHead>
                         <TableHead>Color</TableHead>
                         <TableHead>Store</TableHead>
+                        <TableHead className="text-right">Inventory</TableHead>
                         <TableHead className="text-right">Cost</TableHead>
                         <TableHead className="text-right">RRP</TableHead>
                         <TableHead className="w-24">Actions</TableHead>
@@ -416,6 +417,11 @@ export default function Inventory() {
                           <TableCell>{product.color || '—'}</TableCell>
                           <TableCell>
                             <Badge variant="secondary">{getStoreName(product.store_id)}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge className={product.inventory <= 10 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}>
+                              {product.inventory || 0}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             {product.cost_price ? `$${product.cost_price.toFixed(2)}` : '—'}
@@ -517,6 +523,7 @@ function ProductDialog({ product, stores, isOpen, onClose, onSave, isSaving }) {
         sub_category: product.sub_category || '',
         occasion: product.occasion || '',
         store_id: product.store_id || '',
+        inventory: product.inventory !== undefined ? product.inventory : 100,
       });
     }
   }, [product]);
@@ -527,6 +534,7 @@ function ProductDialog({ product, stores, isOpen, onClose, onSave, isSaving }) {
       ...formData,
       cost_price: formData.cost_price ? parseFloat(formData.cost_price) : null,
       rrp: formData.rrp ? parseFloat(formData.rrp) : null,
+      inventory: formData.inventory ? parseInt(formData.inventory) : 100,
     });
   };
 
@@ -623,6 +631,15 @@ function ProductDialog({ product, stores, isOpen, onClose, onSave, isSaving }) {
                 id="category"
                 value={formData.category}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="inventory">Inventory</Label>
+              <Input
+                id="inventory"
+                type="number"
+                value={formData.inventory}
+                onChange={(e) => setFormData({ ...formData, inventory: e.target.value })}
               />
             </div>
           </div>
