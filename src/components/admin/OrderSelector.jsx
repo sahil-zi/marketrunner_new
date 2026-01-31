@@ -10,6 +10,13 @@ import {
   Package,
   Store
 } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export default function OrderSelector({ 
   orderItems, 
@@ -19,6 +26,7 @@ export default function OrderSelector({
   onSelectionChange 
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterStore, setFilterStore] = useState('all');
 
   // Map product and store info
   const enrichedItems = useMemo(() => {
@@ -55,11 +63,13 @@ export default function OrderSelector({
     return Object.values(groups);
   }, [enrichedItems]);
 
-  // Filter by search
-  const filteredGroups = groupedItems.filter(group =>
-    group.styleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    group.store?.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter by search and store
+  const filteredGroups = groupedItems.filter(group => {
+    const matchesSearch = group.styleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      group.store?.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStore = filterStore === 'all' || group.store?.id === filterStore;
+    return matchesSearch && matchesStore;
+  });
 
   const toggleItem = (item) => {
     const isSelected = selectedItems.some(i => i.id === item.id);
@@ -93,15 +103,28 @@ export default function OrderSelector({
 
   return (
     <div className="space-y-4">
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <Input
-          placeholder="Search by style or store..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-        />
+      {/* Search & Filter */}
+      <div className="flex gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Input
+            placeholder="Search by style or store..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select value={filterStore} onValueChange={setFilterStore}>
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Filter by store" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Stores</SelectItem>
+            {stores.map(store => (
+              <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Summary */}
