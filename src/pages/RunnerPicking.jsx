@@ -381,7 +381,15 @@ export default function RunnerPicking() {
       {/* Fixed Bottom Button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-lg">
         <Button 
-          onClick={() => setShowComplete(true)}
+          onClick={() => {
+            // Check if picking partially
+            const isPartial = runItems.some(i => i.picked_qty > 0 && i.picked_qty < i.target_qty);
+            if (isPartial) {
+              const confirmMsg = "Some items are partially picked. Do you want to continue?";
+              if (!window.confirm(confirmMsg)) return;
+            }
+            setShowComplete(true);
+          }}
           className="w-full h-14 text-lg font-bold bg-teal-600 hover:bg-teal-700"
         >
           <CheckCircle2 className="w-6 h-6 mr-2" />
@@ -454,17 +462,9 @@ export default function RunnerPicking() {
 
             {/* Summary */}
             <div className="bg-gray-50 rounded-xl p-4">
-              <div className="flex justify-between mb-2">
+              <div className="flex justify-between">
                 <span className="text-gray-600">Items Picked:</span>
                 <span className="font-bold">{totalPicked} / {totalTarget}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Estimated Total:</span>
-                <span className="font-bold text-teal-600">
-                  ${runItems.reduce((sum, item) => 
-                    sum + ((item.picked_qty || 0) * (item.cost_price || 0)), 0
-                  ).toFixed(2)}
-                </span>
               </div>
             </div>
 

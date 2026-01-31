@@ -12,6 +12,7 @@ import {
   Loader2,
   RefreshCw
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -68,13 +69,18 @@ export default function RunnerHome() {
     const confirmedStoreIds = new Set(runConfirmations.map(c => c.store_id));
     const completedStores = uniqueStores.filter(sid => confirmedStoreIds.has(sid)).length;
     
+    const totalUnits = items.reduce((sum, i) => sum + (i.target_qty || 0), 0);
+    const pickedUnits = items.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
+    
     return {
       totalStores: uniqueStores.length,
       completedStores: completedStores,
+      totalUnits,
+      pickedUnits,
       percentage: uniqueStores.length > 0 
         ? Math.round((completedStores / uniqueStores.length) * 100) 
         : 0,
-      isComplete: run.status === 'completed' || (completedStores === uniqueStores.length && uniqueStores.length > 0),
+      isComplete: run.status === 'completed' || run.status === 'dropped_off' || (completedStores === uniqueStores.length && uniqueStores.length > 0),
     };
   };
 
@@ -154,11 +160,19 @@ export default function RunnerHome() {
                     {/* Progress */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-gray-600">
-                          <Store className="w-5 h-5" />
-                          <span className="font-medium">
-                            {progress.completedStores} / {progress.totalStores} Stores
-                          </span>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 text-gray-600">
+                            <Store className="w-5 h-5" />
+                            <span className="font-medium">
+                              {progress.completedStores} / {progress.totalStores} Stores
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-gray-600 text-sm">
+                            <Package className="w-4 h-4" />
+                            <span className="font-medium">
+                              {progress.pickedUnits} / {progress.totalUnits} Units Picked
+                            </span>
+                          </div>
                         </div>
                         {isComplete ? (
                           <Badge className="bg-green-100 text-green-700 text-sm px-3 py-1">
@@ -180,16 +194,45 @@ export default function RunnerHome() {
                       </div>
                     </div>
 
-                    {/* Stats */}
-                    <div className="flex items-center gap-6 mt-4 pt-4 border-t">
-                      <div className="flex items-center gap-2 text-gray-600">
-                        <Package className="w-5 h-5" />
-                        <span>{run.total_items || 0} items</span>
+                    {/* Stats & Actions */}
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <Package className="w-5 h-5" />
+                          <span>{run.total_items || 0} items</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <Store className="w-5 h-5" />
+                          <span>{run.total_stores || 0} stores</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-gray-600">
-                        <Store className="w-5 h-5" />
-                        <span>{run.total_stores || 0} stores</span>
-                      </div>
+                      {isComplete && run.status !== 'dropped_off' && (
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            try {
+                              await base44.entities.Run.update(run.id, { 
+                                status: 'dropped_off',
+                                completed_at: new Date().toISOString()
+                              });
+                              loadData();
+                              toast.success('Run marked as dropped off');
+                            } catch (error) {
+                              toast.error('Failed to update run');
+                            }
+                          }}
+                        >
+                          Mark Dropped Off
+                        </Button>
+                      )}
+                      {run.status === 'dropped_off' && (
+                        <Badge className="bg-purple-100 text-purple-700">
+                          Dropped Off
+                        </Badge>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
