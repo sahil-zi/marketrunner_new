@@ -12,8 +12,9 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -37,6 +38,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import CSVUploader from '@/components/admin/CSVUploader';
 
 export default function Returns() {
   const [returns, setReturns] = useState([]);
@@ -88,16 +90,26 @@ export default function Returns() {
         processed_at: new Date().toISOString(),
       });
 
-      // If approved, create a credit ledger entry
-      if (status === 'processed' && returnItem.return_amount) {
-        await base44.entities.Ledger.create({
-          store_id: returnItem.store_id,
-          store_name: returnItem.store_name,
-          transaction_type: 'credit',
-          amount: returnItem.return_amount,
-          date: new Date().toISOString().split('T')[0],
-          notes: `Return credit: ${returnItem.style_name} (${returnItem.quantity}x)`,
-        });
+      // If approved, create a credit ledger entry and update inventory
+      if (status === 'processed') {
+        if (returnItem.return_amount) {
+          await base44.entities.Ledger.create({
+            store_id: returnItem.store_id,
+            store_name: returnItem.store_name,
+            transaction_type: 'credit',
+            amount: returnItem.return_amount,
+            date: new Date().toISOString().split('T')[0],
+            notes: `Return credit: ${returnItem.style_name} (${returnItem.quantity}x)`,
+          });
+        }
+
+        // Update inventory
+        const products = await base44.entities.ProductCatalog.filter({ barcode: returnItem.barcode });
+        if (products.length > 0) {
+          const product = products[0];
+          const newInventory = (product.inventory || 0) + returnItem.quantity;
+          await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+        }
       }
 
       toast.success(`Return ${status}`);
@@ -109,8 +121,132 @@ export default function Returns() {
     }
   }
 
+  async function validateReturns(rows, headers) {
+    const errors = [];
+    const warnings = [];
+    const existingStores = new Map(stores.map(s => [s.name.toLowerCase(), s.id]));
+
+    rows.forEach((row, idx) => {
+      if (!row.Barcode?.trim()) {
+        errors.push({ row: row._rowNum, message: 'Missing barcode' });
+      }
+      if (!row.Quantity || isNaN(parseInt(row.Quantity))) {
+        errors.push({ row: row._rowNum, message: 'Missing or invalid quantity' });
+      }
+      if (!row.Reason?.trim()) {
+        errors.push({ row: row._rowNum, message: 'Missing return reason' });
+      }
+      if (!row.StoreName?.trim()) {
+        errors.push({ row: row._rowNum, message: 'Missing store name' });
+      }
+      if (row.ReturnAmount && isNaN(parseFloat(row.ReturnAmount))) {
+        errors.push({ row: row._rowNum, message: 'Invalid return amount' });
+      }
+      if (row.StoreName && !existingStores.has(row.StoreName.toLowerCase())) {
+        warnings.push({ row: row._rowNum, message: `New store will be created: ${row.StoreName}` });
+      }
+    });
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings,
+      hasDuplicates: false,
+      stats: {
+        'Total Rows': rows.length,
+        'Valid Returns': rows.length - errors.length,
+      },
+    };
+  }
+
+  async function importReturns(rows, mode) {
+    const existingStores = new Map(stores.map(s => [s.name.toLowerCase(), s.id]));
+    const newStoreNames = [...new Set(
+      rows
+        .map(r => r.StoreName?.trim())
+        .filter(name => name && !existingStores.has(name.toLowerCase()))
+    )];
+
+    if (newStoreNames.length > 0) {
+      const createdStores = await base44.entities.Store.bulkCreate(
+        newStoreNames.map(name => ({ name }))
+      );
+      createdStores.forEach(store => {
+        existingStores.set(store.name.toLowerCase(), store.id);
+      });
+    }
+
+    const returnsToCreate = [];
+    const productsToUpdateInventory = [];
+
+    for (const row of rows) {
+      const storeId = existingStores.get(row.StoreName?.trim()?.toLowerCase());
+      if (!storeId) {
+        console.warn(`Store not found for row: ${JSON.stringify(row)}`);
+        continue;
+      }
+
+      const returnData = {
+        store_id: storeId,
+        store_name: row.StoreName?.trim() || '',
+        barcode: row.Barcode?.trim(),
+        style_name: row.Style?.trim(),
+        size: row.Size?.trim(),
+        quantity: parseInt(row.Quantity) || 0,
+        reason: row.Reason?.trim(),
+        return_amount: parseFloat(row.ReturnAmount) || 0,
+        image_url: row.ImageUrl?.trim(),
+        notes: row.Notes?.trim(),
+        status: 'processed',
+        processed_at: new Date().toISOString(),
+      };
+      returnsToCreate.push(returnData);
+
+      productsToUpdateInventory.push({
+        barcode: row.Barcode?.trim(),
+        quantity: parseInt(row.Quantity) || 0
+      });
+    }
+
+    if (returnsToCreate.length > 0) {
+      await base44.entities.Return.bulkCreate(returnsToCreate);
+      
+      // Update inventory
+      const productCatalog = await base44.entities.ProductCatalog.list();
+      const productMap = new Map(productCatalog.map(p => [p.barcode, p]));
+
+      for (const item of productsToUpdateInventory) {
+        const product = productMap.get(item.barcode);
+        if (product) {
+          const newInventory = (product.inventory || 0) + item.quantity;
+          await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+        }
+      }
+
+      // Create ledger entries for returns
+      for (const returnItem of returnsToCreate) {
+        if (returnItem.return_amount) {
+          await base44.entities.Ledger.create({
+            store_id: returnItem.store_id,
+            store_name: returnItem.store_name,
+            transaction_type: 'credit',
+            amount: returnItem.return_amount,
+            date: new Date().toISOString().split('T')[0],
+            notes: `Return credit: ${returnItem.style_name || returnItem.barcode} (${returnItem.quantity}x)`,
+          });
+        }
+      }
+
+      toast.success(`Imported ${returnsToCreate.length} returns`);
+      loadData();
+    } else {
+      toast.info('No new returns to import');
+    }
+  }
+
   const statusConfig = {
     pending: { color: 'bg-amber-100 text-amber-700', icon: Clock, label: 'Pending' },
+    assigned_to_run: { color: 'bg-blue-100 text-blue-700', icon: Clock, label: 'Assigned to Run' },
     processed: { color: 'bg-green-100 text-green-700', icon: CheckCircle2, label: 'Processed' },
     rejected: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'Rejected' },
   };
@@ -130,140 +266,160 @@ export default function Returns() {
         <p className="text-gray-500 mt-1">Manage product returns from stores</p>
       </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                placeholder="Search by barcode, product, or store..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={filterStore} onValueChange={setFilterStore}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Filter by store" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Stores</SelectItem>
-                {stores.map(store => (
-                  <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="processed">Processed</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="browse" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="browse">Browse Returns</TabsTrigger>
+          <TabsTrigger value="upload">Upload CSV</TabsTrigger>
+        </TabsList>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
-            </div>
-          ) : filteredReturns.length === 0 ? (
-            <div className="text-center py-12">
-              <PackageX className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No returns found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Store</TableHead>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Size</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-32">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredReturns.map(ret => {
-                  const status = statusConfig[ret.status] || statusConfig.pending;
-                  const StatusIcon = status.icon;
-                  
-                  return (
-                    <TableRow key={ret.id}>
-                      <TableCell>
-                        {ret.created_date 
-                          ? new Date(ret.created_date).toLocaleDateString()
-                          : '—'
-                        }
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{ret.store_name}</Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">{ret.style_name}</TableCell>
-                      <TableCell>{ret.size || '—'}</TableCell>
-                      <TableCell className="text-right">{ret.quantity}</TableCell>
-                      <TableCell>{reasonLabels[ret.reason] || ret.reason}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        ${ret.return_amount?.toFixed(2) || '0.00'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={status.color}>
-                          <StatusIcon className="w-3 h-3 mr-1" />
-                          {status.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setViewReturn(ret)}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          {ret.status === 'pending' && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => processReturn(ret.id, 'processed')}
-                                disabled={processingReturn === ret.id}
-                                className="text-green-600 hover:text-green-700"
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => processReturn(ret.id, 'rejected')}
-                                disabled={processingReturn === ret.id}
-                                className="text-red-600 hover:text-red-700"
-                              >
-                                Reject
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
+        <TabsContent value="browse" className="space-y-6">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    placeholder="Search by barcode, product, or store..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={filterStore} onValueChange={setFilterStore}>
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue placeholder="Filter by store" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Stores</SelectItem>
+                    {stores.map(store => (
+                      <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="assigned_to_run">Assigned to Run</SelectItem>
+                    <SelectItem value="processed">Processed</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+                </div>
+              ) : filteredReturns.length === 0 ? (
+                <div className="text-center py-12">
+                  <PackageX className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No returns found</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Store</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead>Reason</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="w-32">Actions</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredReturns.map(ret => {
+                      const status = statusConfig[ret.status] || statusConfig.pending;
+                      const StatusIcon = status.icon;
+                      
+                      return (
+                        <TableRow key={ret.id}>
+                          <TableCell>
+                            {ret.created_date 
+                              ? new Date(ret.created_date).toLocaleDateString()
+                              : '—'
+                            }
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary">{ret.store_name}</Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">{ret.style_name}</TableCell>
+                          <TableCell>{ret.size || '—'}</TableCell>
+                          <TableCell className="text-right">{ret.quantity}</TableCell>
+                          <TableCell>{reasonLabels[ret.reason] || ret.reason}</TableCell>
+                          <TableCell className="text-right font-medium">
+                            ${ret.return_amount?.toFixed(2) || '0.00'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={status.color}>
+                              <StatusIcon className="w-3 h-3 mr-1" />
+                              {status.label}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setViewReturn(ret)}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                              {ret.status === 'pending' && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => processReturn(ret.id, 'processed')}
+                                    disabled={processingReturn === ret.id}
+                                    className="text-green-600 hover:text-green-700"
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => processReturn(ret.id, 'rejected')}
+                                    disabled={processingReturn === ret.id}
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    Reject
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="upload">
+          <CSVUploader
+            title="Upload Returns CSV"
+            description="Import returns from a CSV file. Required columns: Barcode, Quantity, Reason, StoreName. Optional: Style, Size, ReturnAmount, ImageUrl, Notes"
+            expectedColumns={['Barcode', 'Quantity', 'Reason', 'StoreName']}
+            onValidate={validateReturns}
+            onConfirm={importReturns}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* View Return Dialog */}
       <Dialog open={!!viewReturn} onOpenChange={() => setViewReturn(null)}>

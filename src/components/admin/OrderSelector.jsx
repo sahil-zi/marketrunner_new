@@ -3,20 +3,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { 
-  Search, 
-  CheckCircle2, 
+import {
+  Search,
+  CheckCircle2,
   Circle,
   Package,
   Store
 } from 'lucide-react';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { MultiSelect } from '@/components/ui/multi-select';
 
 export default function OrderSelector({ 
   orderItems, 
@@ -26,7 +20,7 @@ export default function OrderSelector({
   onSelectionChange 
 }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStore, setFilterStore] = useState('all');
+  const [selectedStoreIds, setSelectedStoreIds] = useState(stores.map(s => s.id));
 
   // Map product and store info
   const enrichedItems = useMemo(() => {
@@ -38,7 +32,7 @@ export default function OrderSelector({
       return {
         ...item,
         product,
-        store: product?.store_id ? storeMap.get(product.store_id) : null,
+        store: product?.store_id ? storeMap.get(product.store_id) : (item.store ? storeMap.get(item.store.id) : null),
       };
     });
   }, [orderItems, products, stores]);
@@ -48,11 +42,11 @@ export default function OrderSelector({
     const groups = {};
     
     enrichedItems.forEach(item => {
-      const styleName = item.product?.style_name || 'Unknown';
+      const styleName = item.product?.style_name || item.style_name || 'Unknown';
       if (!groups[styleName]) {
         groups[styleName] = {
           styleName,
-          imageUrl: item.product?.image_url,
+          imageUrl: item.product?.image_url || item.image_url,
           store: item.store,
           items: [],
         };
@@ -63,11 +57,11 @@ export default function OrderSelector({
     return Object.values(groups);
   }, [enrichedItems]);
 
-  // Filter by search and store
+  // Filter by search and selected stores
   const filteredGroups = groupedItems.filter(group => {
     const matchesSearch = group.styleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       group.store?.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStore = filterStore === 'all' || group.store?.id === filterStore;
+    const matchesStore = selectedStoreIds.length === 0 || selectedStoreIds.includes(group.store?.id);
     return matchesSearch && matchesStore;
   });
 
@@ -103,8 +97,8 @@ export default function OrderSelector({
 
   return (
     <div className="space-y-4">
-      {/* Search & Filter */}
-      <div className="flex gap-3">
+      {/* Search & Store Filter */}
+      <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
@@ -114,17 +108,13 @@ export default function OrderSelector({
             className="pl-10"
           />
         </div>
-        <Select value={filterStore} onValueChange={setFilterStore}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Filter by store" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Stores</SelectItem>
-            {stores.map(store => (
-              <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          options={stores.map(s => ({ label: s.name, value: s.id }))}
+          selected={selectedStoreIds}
+          onSelectedChange={setSelectedStoreIds}
+          placeholder="Filter by stores..."
+          className="w-full sm:w-60"
+        />
       </div>
 
       {/* Summary */}
@@ -201,7 +191,7 @@ export default function OrderSelector({
                             <Circle className="w-4 h-4 text-gray-300" />
                           )}
                           <span className="text-sm text-gray-700">
-                            Size: <strong>{item.product?.size || 'N/A'}</strong>
+                            Size: <strong>{item.product?.size || item.size || 'N/A'}</strong>
                           </span>
                         </div>
                         <span className="text-sm font-medium text-gray-900">
