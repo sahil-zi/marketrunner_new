@@ -178,7 +178,7 @@ export default function Dashboard() {
         />
         <StatCard
           title="Store Balance"
-          value={`$${Math.abs(stats.storeBalance).toFixed(2)}`}
+          value={`د.إ ${Math.abs(stats.storeBalance).toFixed(2)}`}
           icon={DollarSign}
           color={stats.storeBalance >= 0 ? 'green' : 'amber'}
           isLoading={isLoading}

@@ -14,7 +14,8 @@ import {
   LogOut,
   User,
   Wifi,
-  WifiOff
+  WifiOff,
+  PackageX
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,7 @@ const adminNavItems = [
   { name: 'Dashboard', icon: LayoutDashboard, page: 'Dashboard' },
   { name: 'Inventory', icon: Package, page: 'Inventory' },
   { name: 'Orders', icon: ShoppingCart, page: 'Orders' },
+  { name: 'Returns', icon: PackageX, page: 'Returns' },
   { name: 'Runs', icon: Truck, page: 'Runs' },
   { name: 'Financials', icon: DollarSign, page: 'Financials' },
   { name: 'Settings', icon: Settings, page: 'AdminSettings' },

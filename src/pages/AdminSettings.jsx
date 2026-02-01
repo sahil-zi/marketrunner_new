@@ -362,33 +362,29 @@ function AddUserButton({ onSuccess }) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState('user');
-  const [isCreating, setIsCreating] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
 
-  async function handleCreate(e) {
+  async function handleAddUser(e) {
     e.preventDefault();
-    if (!email || !password) {
-      toast.error('Please enter email and password');
+    if (!email) {
+      toast.error('Please enter an email');
       return;
     }
 
-    setIsCreating(true);
+    setIsAddingUser(true);
     try {
-      // Create user with email/password authentication
       await base44.users.inviteUser(email, role);
-      
-      toast.success('User created successfully. They can now sign in with their email.');
+      toast.success('User added successfully. They will receive an email to set up their password.');
       setIsOpen(false);
       setEmail('');
       setFullName('');
-      setPassword('');
       setRole('user');
       onSuccess();
     } catch (error) {
-      toast.error(error.message || 'Failed to create user');
+      toast.error(error.message || 'Failed to add user');
     } finally {
-      setIsCreating(false);
+      setIsAddingUser(false);
     }
   }
 
@@ -405,9 +401,9 @@ function AddUserButton({ onSuccess }) {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create New User</DialogTitle>
+            <DialogTitle>Add New User</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreate} className="space-y-4">
+          <form onSubmit={handleAddUser} className="space-y-4">
             <div>
               <Label htmlFor="email">Email Address *</Label>
               <Input
@@ -418,7 +414,7 @@ function AddUserButton({ onSuccess }) {
                 placeholder="user@example.com"
                 required
               />
-              <p className="text-xs text-gray-500 mt-1">User will sign in with this email</p>
+              <p className="text-xs text-gray-500 mt-1">An email with a password setup link will be sent to this address.</p>
             </div>
             <div>
               <Label htmlFor="fullName">Full Name</Label>
@@ -446,9 +442,9 @@ function AddUserButton({ onSuccess }) {
               <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isCreating} className="bg-teal-600 hover:bg-teal-700">
-                {isCreating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Create User
+              <Button type="submit" disabled={isAddingUser} className="bg-teal-600 hover:bg-teal-700">
+                {isAddingUser ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Add User
               </Button>
             </DialogFooter>
           </form>
