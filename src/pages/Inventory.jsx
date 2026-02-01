@@ -485,10 +485,10 @@ export default function Inventory() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            {product.cost_price ? `$${product.cost_price.toFixed(2)}` : '—'}
+                            {product.cost_price ? `AED ${product.cost_price.toFixed(2)}` : '—'}
                           </TableCell>
                           <TableCell className="text-right">
-                            {product.rrp ? `$${product.rrp.toFixed(2)}` : '—'}
+                            {product.rrp ? `AED ${product.rrp.toFixed(2)}` : '—'}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">

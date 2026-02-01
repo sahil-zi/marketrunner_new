@@ -488,7 +488,7 @@ Run: #${run.run_number}
                       <div className="text-right flex items-center gap-2">
                         <div>
                           <p className="text-lg font-bold text-teal-600">
-                            ${conf.total_amount?.toFixed(2) || '0.00'}
+                            AED {conf.total_amount?.toFixed(2) || '0.00'}
                           </p>
                         </div>
                         <Button

@@ -359,7 +359,7 @@ export default function Returns() {
                           <TableCell className="text-right">{ret.quantity}</TableCell>
                           <TableCell>{reasonLabels[ret.reason] || ret.reason}</TableCell>
                           <TableCell className="text-right font-medium">
-                            ${ret.return_amount?.toFixed(2) || '0.00'}
+                            AED {ret.return_amount?.toFixed(2) || '0.00'}
                           </TableCell>
                           <TableCell>
                             <Badge className={status.color}>
@@ -453,7 +453,7 @@ export default function Returns() {
                 <div>
                   <p className="text-sm text-gray-500">Amount</p>
                   <p className="font-medium text-teal-600">
-                    ${viewReturn.return_amount?.toFixed(2) || '0.00'}
+                    AED {viewReturn.return_amount?.toFixed(2) || '0.00'}
                   </p>
                 </div>
               </div>

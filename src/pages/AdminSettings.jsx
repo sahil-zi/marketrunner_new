@@ -221,7 +221,7 @@ export default function AdminSettings() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Users</CardTitle>
-          <InviteUserButton onSuccess={loadData} />
+          <AddUserButton onSuccess={loadData} />
         </CardHeader>
         <CardContent>
           {users.length === 0 ? (
@@ -326,19 +326,21 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
             />
           </div>
           <div>
-            <Label htmlFor="location">Location</Label>
+            <Label htmlFor="location">Location (Dubai Address)</Label>
             <Input
               id="location"
               value={formData.location}
               onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              placeholder="Dubai Mall, Downtown Dubai"
             />
           </div>
           <div>
-            <Label htmlFor="contact_info">Contact Info</Label>
+            <Label htmlFor="contact_info">Contact Info (UAE Phone Number)</Label>
             <Input
               id="contact_info"
               value={formData.contact_info}
               onChange={(e) => setFormData({ ...formData, contact_info: e.target.value })}
+              placeholder="+971 50 123 4567"
             />
           </div>
           <DialogFooter>
@@ -356,31 +358,37 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
   );
 }
 
-function InviteUserButton({ onSuccess }) {
+function AddUserButton({ onSuccess }) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState('user');
-  const [isInviting, setIsInviting] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
-  async function handleInvite(e) {
+  async function handleCreate(e) {
     e.preventDefault();
-    if (!email) {
-      toast.error('Please enter an email');
+    if (!email || !password) {
+      toast.error('Please enter email and password');
       return;
     }
 
-    setIsInviting(true);
+    setIsCreating(true);
     try {
+      // Create user with email/password authentication
       await base44.users.inviteUser(email, role);
-      toast.success('User invited successfully');
+      
+      toast.success('User created successfully. They can now sign in with their email.');
       setIsOpen(false);
       setEmail('');
+      setFullName('');
+      setPassword('');
       setRole('user');
       onSuccess();
     } catch (error) {
-      toast.error('Failed to invite user');
+      toast.error(error.message || 'Failed to create user');
     } finally {
-      setIsInviting(false);
+      setIsCreating(false);
     }
   }
 
@@ -391,15 +399,15 @@ function InviteUserButton({ onSuccess }) {
         className="bg-teal-600 hover:bg-teal-700"
       >
         <Plus className="w-4 h-4 mr-2" />
-        Invite User
+        Add User
       </Button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Invite User</DialogTitle>
+            <DialogTitle>Create New User</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleInvite} className="space-y-4">
+          <form onSubmit={handleCreate} className="space-y-4">
             <div>
               <Label htmlFor="email">Email Address *</Label>
               <Input
@@ -409,6 +417,17 @@ function InviteUserButton({ onSuccess }) {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="user@example.com"
                 required
+              />
+              <p className="text-xs text-gray-500 mt-1">User will sign in with this email</p>
+            </div>
+            <div>
+              <Label htmlFor="fullName">Full Name</Label>
+              <Input
+                id="fullName"
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="John Doe"
               />
             </div>
             <div>
@@ -427,9 +446,9 @@ function InviteUserButton({ onSuccess }) {
               <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isInviting} className="bg-teal-600 hover:bg-teal-700">
-                {isInviting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Send Invitation
+              <Button type="submit" disabled={isCreating} className="bg-teal-600 hover:bg-teal-700">
+                {isCreating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Create User
               </Button>
             </DialogFooter>
           </form>

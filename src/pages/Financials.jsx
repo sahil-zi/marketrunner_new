@@ -244,7 +244,7 @@ export default function Financials() {
                   Total Balance
                 </p>
                 <p className={`text-3xl font-bold ${totalBalance >= 0 ? 'text-green-800' : 'text-red-800'}`}>
-                  ${Math.abs(totalBalance).toFixed(2)}
+                  AED {Math.abs(totalBalance).toFixed(2)}
                 </p>
               </div>
             </div>
@@ -329,11 +329,11 @@ export default function Financials() {
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Total Debits:</span>
-                        <span className="text-red-600 font-medium">${store.debits.toFixed(2)}</span>
+                        <span className="text-red-600 font-medium">AED {store.debits.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Total Credits:</span>
-                        <span className="text-green-600 font-medium">${store.credits.toFixed(2)}</span>
+                        <span className="text-green-600 font-medium">AED {store.credits.toFixed(2)}</span>
                       </div>
                       <hr className="my-2" />
                       <div className="flex justify-between">
@@ -341,7 +341,7 @@ export default function Financials() {
                         <span className={`text-lg font-bold ${
                           store.balance > 0 ? 'text-green-600' : store.balance < 0 ? 'text-red-600' : 'text-gray-600'
                         }`}>
-                          ${Math.abs(store.balance).toFixed(2)}
+                          AED {Math.abs(store.balance).toFixed(2)}
                           {store.balance !== 0 && (
                             <span className="text-xs ml-1">
                               {store.balance > 0 ? '(owed to you)' : '(you owe)'}
@@ -514,7 +514,7 @@ export default function Financials() {
                           <TableCell className={`text-right font-medium ${
                             entry.transaction_type === 'credit' ? 'text-green-600' : 'text-red-600'
                           }`}>
-                            ${entry.amount?.toFixed(2)}
+                            AED {entry.amount?.toFixed(2)}
                           </TableCell>
                           <TableCell>
                             {entry.run_number ? `#${entry.run_number}` : '—'}

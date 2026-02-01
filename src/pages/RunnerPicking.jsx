@@ -258,7 +258,7 @@ export default function RunnerPicking() {
         }
       }
 
-      toast.success(`Store confirmed - Net: $${netAmount.toFixed(2)}`);
+      toast.success(`Store confirmed - Net: AED ${netAmount.toFixed(2)}`);
       navigate(createPageUrl(`RunnerPickStore?runId=${runId}`));
     } catch (error) {
       toast.error('Failed to complete store');
