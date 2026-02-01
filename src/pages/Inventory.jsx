@@ -12,13 +12,14 @@ import {
   Loader2,
   Image as ImageIcon,
   Download,
-  Printer
+  Printer,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -80,8 +81,10 @@ export default function Inventory() {
     }
   }
 
+  // Get unique categories from products
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
 
+  // Filter products
   const filteredProducts = products.filter(product => {
     const matchesSearch = 
       product.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -91,6 +94,24 @@ export default function Inventory() {
     return matchesSearch && matchesStore && matchesCategory;
   });
 
+  // Selection handlers
+  const toggleProductSelection = (productId) => {
+    setSelectedProducts(prev => 
+      prev.includes(productId) 
+        ? prev.filter(id => id !== productId)
+        : [...prev, productId]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedProducts.length === filteredProducts.length) {
+      setSelectedProducts([]);
+    } else {
+      setSelectedProducts(filteredProducts.map(p => p.id));
+    }
+  };
+
+  // Validate products CSV
   async function validateProducts(rows, headers) {
     const errors = [];
     const warnings = [];
@@ -155,7 +176,9 @@ export default function Inventory() {
     };
   }
 
+  // Import products from CSV
   async function importProducts(rows, mode) {
+    // First, create any new stores
     const existingStoreNames = new Map(stores.map(s => [s.name.toLowerCase(), s.id]));
     const newStoreNames = [...new Set(
       rows
@@ -172,6 +195,7 @@ export default function Inventory() {
       });
     }
 
+    // Prepare products for import
     const productsToCreate = [];
     const productsToUpdate = [];
     const existingBarcodes = new Map(products.map(p => [p.barcode, p.id]));
@@ -206,10 +230,12 @@ export default function Inventory() {
       }
     });
 
+    // Create new products
     if (productsToCreate.length > 0) {
       await base44.entities.ProductCatalog.bulkCreate(productsToCreate);
     }
 
+    // Update existing products
     for (const product of productsToUpdate) {
       await base44.entities.ProductCatalog.update(product.id, product);
     }
@@ -218,7 +244,9 @@ export default function Inventory() {
     loadData();
   }
 
+  // Save product (create or update)
   async function saveProduct(productData) {
+    // Validate store exists
     if (productData.store_id && !stores.find(s => s.id === productData.store_id)) {
       toast.error('Selected store does not exist');
       return;
@@ -243,6 +271,7 @@ export default function Inventory() {
     }
   }
 
+  // Delete product
   async function deleteProduct(id) {
     try {
       await base44.entities.ProductCatalog.delete(id);
@@ -259,8 +288,9 @@ export default function Inventory() {
     return store?.name || '—';
   };
 
+  // Export products to CSV
   function exportProducts() {
-    const headers = ['Barcode', 'Style', 'Size', 'Color', 'ImageURL', 'Cost', 'RRP', 'Family', 'Category', 'SubCat', 'Occasion', 'StoreName'];
+    const headers = ['Barcode', 'Style', 'Size', 'Color', 'ImageURL', 'Cost', 'RRP', 'Family', 'Category', 'SubCat', 'Occasion', 'StoreName', 'Inventory'];
     const rows = products.map(p => [
       p.barcode,
       p.style_name,
@@ -274,6 +304,7 @@ export default function Inventory() {
       p.sub_category || '',
       p.occasion || '',
       getStoreName(p.store_id),
+      p.inventory || 0,
     ]);
     
     const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -287,22 +318,7 @@ export default function Inventory() {
     toast.success('Products exported');
   }
 
-  const toggleSelectProduct = (product) => {
-    const isSelected = selectedProducts.some(p => p.id === product.id);
-    if (isSelected) {
-      setSelectedProducts(selectedProducts.filter(p => p.id !== product.id));
-    } else {
-      setSelectedProducts([...selectedProducts, product]);
-    }
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedProducts.length === filteredProducts.length) {
-      setSelectedProducts([]);
-    } else {
-      setSelectedProducts(filteredProducts);
-    }
-  };
+  const selectedProductsData = products.filter(p => selectedProducts.includes(p.id));
 
   return (
     <div className="space-y-8">
@@ -315,8 +331,8 @@ export default function Inventory() {
         <div className="flex gap-2">
           {selectedProducts.length > 0 && (
             <LabelPrinter 
-              items={selectedProducts.map(p => ({ ...p, quantity: 1 }))} 
-              buttonText={`Print Labels (${selectedProducts.length})`}
+              items={selectedProductsData} 
+              buttonText={`Print ${selectedProducts.length} Labels`}
               variant="outline"
             />
           )}
@@ -377,7 +393,8 @@ export default function Inventory() {
                    onClick={exportProducts}
                    className="shrink-0"
                  >
-                   Export SKUs
+                   <Download className="w-4 h-4 mr-2" />
+                   Export
                  </Button>
                 </div>
                 </CardContent>
@@ -401,10 +418,17 @@ export default function Inventory() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-12">
-                          <Checkbox 
-                            checked={selectedProducts.length === filteredProducts.length && filteredProducts.length > 0}
-                            onCheckedChange={toggleSelectAll}
-                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={toggleSelectAll}
+                          >
+                            {selectedProducts.length === filteredProducts.length ? (
+                              <CheckSquare className="w-4 h-4 text-teal-600" />
+                            ) : (
+                              <Square className="w-4 h-4 text-gray-400" />
+                            )}
+                          </Button>
                         </TableHead>
                         <TableHead className="w-16">Image</TableHead>
                         <TableHead>Barcode</TableHead>
@@ -422,10 +446,17 @@ export default function Inventory() {
                       {filteredProducts.map(product => (
                         <TableRow key={product.id}>
                           <TableCell>
-                            <Checkbox 
-                              checked={selectedProducts.some(p => p.id === product.id)}
-                              onCheckedChange={() => toggleSelectProduct(product)}
-                            />
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => toggleProductSelection(product.id)}
+                            >
+                              {selectedProducts.includes(product.id) ? (
+                                <CheckSquare className="w-4 h-4 text-teal-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                            </Button>
                           </TableCell>
                           <TableCell>
                             {product.image_url ? (
