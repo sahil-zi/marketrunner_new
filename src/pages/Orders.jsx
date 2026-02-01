@@ -42,6 +42,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export default function Orders() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [orders, setOrders] = useState([]);
   const [orderItems, setOrderItems] = useState([]);
   const [products, setProducts] = useState([]);
@@ -86,22 +88,32 @@ export default function Orders() {
   });
 
   // Filter orders
-  const filteredOrders = ordersWithItems.filter(order => {
-    const matchesSearch = 
-      order.platform_order_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.platform_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPlatform = filterPlatform === 'all' || order.platform_name === filterPlatform;
-    
-    let matchesStatus = true;
-    if (filterStatus !== 'all') {
-      const allItemsStatus = order.items.every(item => item.status === filterStatus);
-      matchesStatus = filterStatus === 'pending' 
-        ? order.items.some(item => item.status === 'pending')
-        : allItemsStatus;
-    }
-    
-    return matchesSearch && matchesPlatform && matchesStatus;
-  });
+  const filteredOrders = React.useMemo(() => {
+    const filtered = ordersWithItems.filter(order => {
+      const matchesSearch = 
+        order.platform_order_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.platform_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesPlatform = filterPlatform === 'all' || order.platform_name === filterPlatform;
+      
+      let matchesStatus = true;
+      if (filterStatus !== 'all') {
+        const allItemsStatus = order.items.every(item => item.status === filterStatus);
+        matchesStatus = filterStatus === 'pending' 
+          ? order.items.some(item => item.status === 'pending')
+          : allItemsStatus;
+      }
+      
+      return matchesSearch && matchesPlatform && matchesStatus;
+    });
+    return filtered;
+  }, [ordersWithItems, searchQuery, filterPlatform, filterStatus]);
+
+  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+  const currentOrders = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredOrders.slice(startIndex, endIndex);
+  }, [filteredOrders, currentPage, itemsPerPage]);
 
   // Validate orders CSV
   async function validateOrders(rows, headers) {
@@ -383,7 +395,7 @@ export default function Orders() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredOrders.map(order => (
+                      {currentOrders.map(order => (
                         <TableRow key={order.id}>
                           <TableCell>
                             <Badge variant="secondary">{order.platform_name}</Badge>
@@ -507,7 +519,50 @@ export default function Orders() {
                             ))}
                             </TableBody>
                             </Table>
-                </div>
+
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700">Orders per page:</span>
+                      <Select
+                        value={String(itemsPerPage)}
+                        onValueChange={(value) => {
+                          setItemsPerPage(Number(value));
+                          setCurrentPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="w-20">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm text-gray-700">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                 </div>
               )}
             </CardContent>
           </Card>

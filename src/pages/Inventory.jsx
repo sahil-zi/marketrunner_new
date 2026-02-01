@@ -48,8 +48,18 @@ import { toast } from 'sonner';
 import CSVUploader from '@/components/admin/CSVUploader';
 import LabelPrinter from '@/components/admin/LabelPrinter';
 
+const processGoogleDriveLink = (url) => {
+  if (!url) return url;
+  const match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return `https://drive.google.com/uc?id=${match[1]}`;
+  }
+  return url;
+};
+
 export default function Inventory() {
   const [products, setProducts] = useState([]);
+  const [originalProducts, setOriginalProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,6 +70,10 @@ export default function Inventory() {
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [selectedProducts, setSelectedProducts] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [sortBy, setSortBy] = useState('created_date');
+  const [sortOrder, setSortOrder] = useState('desc');
 
   useEffect(() => {
     loadData();
@@ -73,6 +87,7 @@ export default function Inventory() {
         base44.entities.Store.list(),
       ]);
       setProducts(productsData);
+      setOriginalProducts(productsData);
       setStores(storesData);
     } catch (error) {
       toast.error('Failed to load inventory');
@@ -84,15 +99,52 @@ export default function Inventory() {
   // Get unique categories from products
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
 
-  // Filter products
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = 
-      product.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.style_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStore = filterStore === 'all' || product.store_id === filterStore;
-    const matchesCategory = filterCategory === 'all' || product.category === filterCategory;
-    return matchesSearch && matchesStore && matchesCategory;
-  });
+  // Filter and sort products
+  const filteredProducts = React.useMemo(() => {
+    const filtered = originalProducts.filter(product => {
+      const matchesSearch = 
+        product.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.style_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStore = filterStore === 'all' || product.store_id === filterStore;
+      const matchesCategory = filterCategory === 'all' || product.category === filterCategory;
+      return matchesSearch && matchesStore && matchesCategory;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      const aValue = a[sortBy];
+      const bValue = b[sortBy];
+
+      if (aValue === null || aValue === undefined) return sortOrder === 'asc' ? 1 : -1;
+      if (bValue === null || bValue === undefined) return sortOrder === 'asc' ? -1 : 1;
+
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return sortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
+      } else if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+      } else {
+        return 0;
+      }
+    });
+
+    return sorted;
+  }, [originalProducts, searchQuery, filterStore, filterCategory, sortBy, sortOrder]);
+
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const currentProducts = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredProducts.slice(startIndex, endIndex);
+  }, [filteredProducts, currentPage, itemsPerPage]);
+
+  const handleSort = (column) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('asc');
+    }
+    setCurrentPage(1);
+  };
 
   // Selection handlers
   const toggleProductSelection = (productId) => {
@@ -407,7 +459,7 @@ export default function Inventory() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
                 </div>
-              ) : filteredProducts.length === 0 ? (
+              ) : currentProducts.length === 0 ? (
                 <div className="text-center py-12">
                   <Package className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                   <p className="text-gray-500">No products found</p>
@@ -431,19 +483,19 @@ export default function Inventory() {
                           </Button>
                         </TableHead>
                         <TableHead className="w-16">Image</TableHead>
-                        <TableHead>Barcode</TableHead>
-                        <TableHead>Style</TableHead>
-                        <TableHead>Size</TableHead>
-                        <TableHead>Color</TableHead>
-                        <TableHead>Store</TableHead>
-                        <TableHead className="text-right">Inventory</TableHead>
-                        <TableHead className="text-right">Cost</TableHead>
-                        <TableHead className="text-right">RRP</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('barcode')}>Barcode {sortBy === 'barcode' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('style_name')}>Style {sortBy === 'style_name' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('size')}>Size {sortBy === 'size' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('color')}>Color {sortBy === 'color' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('store_id')}>Store {sortBy === 'store_id' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('inventory')}>Inventory {sortBy === 'inventory' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('cost_price')}>Cost {sortBy === 'cost_price' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
+                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('rrp')}>RRP {sortBy === 'rrp' && (sortOrder === 'asc' ? '↑' : '↓')}</TableHead>
                         <TableHead className="w-24">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredProducts.map(product => (
+                      {currentProducts.map(product => (
                         <TableRow key={product.id}>
                           <TableCell>
                             <Button
@@ -461,7 +513,7 @@ export default function Inventory() {
                           <TableCell>
                             {product.image_url ? (
                               <img 
-                                src={product.image_url} 
+                                src={processGoogleDriveLink(product.image_url)} 
                                 alt={product.style_name}
                                 className="w-10 h-10 object-cover rounded-lg"
                                 onError={(e) => { e.target.style.display = 'none'; }}
@@ -513,6 +565,49 @@ export default function Inventory() {
                       ))}
                     </TableBody>
                   </Table>
+
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700">Items per page:</span>
+                      <Select
+                        value={String(itemsPerPage)}
+                        onValueChange={(value) => {
+                          setItemsPerPage(Number(value));
+                          setCurrentPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="w-20">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm text-gray-700">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>

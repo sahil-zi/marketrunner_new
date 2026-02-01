@@ -49,6 +49,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 export default function Financials() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [ledger, setLedger] = useState([]);
   const [stores, setStores] = useState([]);
   const [confirmations, setConfirmations] = useState([]);
@@ -130,23 +132,32 @@ export default function Financials() {
   const totalBalance = storeBalances.reduce((sum, b) => sum + b.balance, 0);
 
   // Filter ledger entries
-  const filteredLedger = ledger.filter(entry => {
-    const matchesStore = filterStore === 'all' || entry.store_id === filterStore;
-    const matchesType = filterType === 'all' || entry.transaction_type === filterType;
-    
-    const entryDate = new Date(entry.date);
-    const matchesDateFrom = !filterDateFrom || entryDate >= filterDateFrom;
-    
-    // Include the entire "To" date by comparing to the end of that day
-    let matchesDateTo = true;
-    if (filterDateTo) {
-      const endOfToDate = new Date(filterDateTo);
-      endOfToDate.setHours(23, 59, 59, 999);
-      matchesDateTo = entryDate <= endOfToDate;
-    }
+  const filteredLedger = React.useMemo(() => {
+    const filtered = ledger.filter(entry => {
+      const matchesStore = filterStore === 'all' || entry.store_id === filterStore;
+      const matchesType = filterType === 'all' || entry.transaction_type === filterType;
+      
+      const entryDate = new Date(entry.date);
+      const matchesDateFrom = !filterDateFrom || entryDate >= filterDateFrom;
+      
+      let matchesDateTo = true;
+      if (filterDateTo) {
+        const endOfToDate = new Date(filterDateTo);
+        endOfToDate.setHours(23, 59, 59, 999);
+        matchesDateTo = entryDate <= endOfToDate;
+      }
 
-    return matchesStore && matchesType && matchesDateFrom && matchesDateTo;
-  });
+      return matchesStore && matchesType && matchesDateFrom && matchesDateTo;
+    });
+    return filtered;
+  }, [ledger, filterStore, filterType, filterDateFrom, filterDateTo]);
+
+  const totalPages = Math.ceil(filteredLedger.length / itemsPerPage);
+  const currentLedger = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredLedger.slice(startIndex, endIndex);
+  }, [filteredLedger, currentPage, itemsPerPage]);
 
   // Add ledger entry
   async function addLedgerEntry() {
@@ -486,7 +497,7 @@ export default function Financials() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredLedger.map(entry => {
+                    {currentLedger.map(entry => {
                       const confirmation = entry.run_confirmation_id 
                         ? getConfirmation(entry.run_confirmation_id)
                         : null;
@@ -537,6 +548,49 @@ export default function Financials() {
                     })}
                   </TableBody>
                 </Table>
+
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700">Transactions per page:</span>
+                      <Select
+                        value={String(itemsPerPage)}
+                        onValueChange={(value) => {
+                          setItemsPerPage(Number(value));
+                          setCurrentPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="w-20">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm text-gray-700">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
               )}
             </CardContent>
           </Card>

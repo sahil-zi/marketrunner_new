@@ -41,6 +41,8 @@ import { toast } from 'sonner';
 import CSVUploader from '@/components/admin/CSVUploader';
 
 export default function Returns() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [returns, setReturns] = useState([]);
   const [stores, setStores] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -70,15 +72,25 @@ export default function Returns() {
     }
   }
 
-  const filteredReturns = returns.filter(ret => {
-    const matchesStore = filterStore === 'all' || ret.store_id === filterStore;
-    const matchesStatus = filterStatus === 'all' || ret.status === filterStatus;
-    const matchesSearch = 
-      ret.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ret.style_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ret.store_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStore && matchesStatus && matchesSearch;
-  });
+  const filteredReturns = React.useMemo(() => {
+    const filtered = returns.filter(ret => {
+      const matchesStore = filterStore === 'all' || ret.store_id === filterStore;
+      const matchesStatus = filterStatus === 'all' || ret.status === filterStatus;
+      const matchesSearch = 
+        ret.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ret.style_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ret.store_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesStore && matchesStatus && matchesSearch;
+    });
+    return filtered;
+  }, [returns, filterStore, filterStatus, searchQuery]);
+
+  const totalPages = Math.ceil(filteredReturns.length / itemsPerPage);
+  const currentReturns = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredReturns.slice(startIndex, endIndex);
+  }, [filteredReturns, currentPage, itemsPerPage]);
 
   async function processReturn(returnId, status) {
     setProcessingReturn(returnId);
@@ -339,7 +351,7 @@ export default function Returns() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredReturns.map(ret => {
+                    {currentReturns.map(ret => {
                       const status = statusConfig[ret.status] || statusConfig.pending;
                       const StatusIcon = status.icon;
                       
@@ -405,6 +417,49 @@ export default function Returns() {
                     })}
                   </TableBody>
                 </Table>
+
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700">Returns per page:</span>
+                      <Select
+                        value={String(itemsPerPage)}
+                        onValueChange={(value) => {
+                          setItemsPerPage(Number(value));
+                          setCurrentPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="w-20">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm text-gray-700">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
               )}
             </CardContent>
           </Card>

@@ -39,6 +39,8 @@ import OrderSelector from '@/components/admin/OrderSelector';
 import LabelPrinter from '@/components/admin/LabelPrinter';
 
 export default function Runs() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [runs, setRuns] = useState([]);
   const [pendingOrderItems, setPendingOrderItems] = useState([]);
   const [pendingReturnItems, setPendingReturnItems] = useState([]);
@@ -409,7 +411,7 @@ export default function Runs() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {runs.map(run => {
+          {runs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map(run => {
             const status = statusConfig[run.status] || statusConfig.draft;
             const StatusIcon = status.icon;
 
@@ -493,6 +495,49 @@ export default function Runs() {
           })}
         </div>
       )}
+
+      <div className="flex items-center justify-between p-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-700">Runs per page:</span>
+          <Select
+            value={String(itemsPerPage)}
+            onValueChange={(value) => {
+              setItemsPerPage(Number(value));
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="w-20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="25">25</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-gray-700">
+            Page {currentPage} of {Math.ceil(runs.length / itemsPerPage)}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(runs.length / itemsPerPage)))}
+            disabled={currentPage === Math.ceil(runs.length / itemsPerPage)}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
 
       {/* Generate Run Dialog */}
       <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
