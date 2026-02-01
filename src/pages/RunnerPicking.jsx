@@ -84,23 +84,28 @@ export default function RunnerPicking() {
     }
   }
 
-  // Group items by style
+  // Group items by style and type
   const styleGroups = React.useMemo(() => {
     const groups = {};
     
     runItems.forEach(item => {
       const styleName = item.style_name || 'Unknown';
-      if (!groups[styleName]) {
-        groups[styleName] = {
+      const key = `${styleName}-${item.type}`;
+      if (!groups[key]) {
+        groups[key] = {
           styleName,
+          type: item.type,
           imageUrl: item.image_url,
           items: [],
         };
       }
-      groups[styleName].items.push(item);
+      groups[key].items.push(item);
     });
 
-    return Object.values(groups).sort((a, b) => a.styleName.localeCompare(b.styleName));
+    return Object.values(groups).sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'pickup' ? -1 : 1;
+      return a.styleName.localeCompare(b.styleName);
+    });
   }, [runItems]);
 
   // Update picked quantity
@@ -189,10 +194,16 @@ export default function RunnerPicking() {
       // Upload receipt image
       const { file_url } = await base44.integrations.Core.UploadFile({ file: receiptImage });
 
-      // Calculate total amount
-      const totalAmount = runItems.reduce((sum, item) => {
-        return sum + ((item.picked_qty || 0) * (item.cost_price || 0));
-      }, 0);
+      // Calculate amounts separately
+      const pickupAmount = runItems
+        .filter(item => item.type === 'pickup')
+        .reduce((sum, item) => sum + ((item.picked_qty || 0) * (item.cost_price || 0)), 0);
+
+      const returnAmount = runItems
+        .filter(item => item.type === 'return')
+        .reduce((sum, item) => sum + ((item.picked_qty || 0) * (item.cost_price || 0)), 0);
+      
+      const netAmount = pickupAmount - returnAmount;
 
       // Create confirmation
       await base44.entities.RunConfirmation.create({
@@ -201,38 +212,68 @@ export default function RunnerPicking() {
         store_name: store?.name || '',
         confirmed_at: new Date().toISOString(),
         receipt_image_url: file_url,
-        total_amount: totalAmount,
+        total_amount: netAmount,
         notes,
       });
 
-      // Create ledger entry
-      await base44.entities.Ledger.create({
-        store_id: storeId,
-        store_name: store?.name || '',
-        transaction_type: 'debit',
-        amount: totalAmount,
-        date: new Date().toISOString().split('T')[0],
-        notes: `Run #${run.run_number} pickup`,
-        run_number: run.run_number,
-      });
-
-      // Update run items status and corresponding order items
-      for (const item of runItems) {
-        const status = item.picked_qty > 0 ? 'picked' : 'not_found';
-        await base44.entities.RunItem.update(item.id, { status });
-        
-        // Also update all related OrderItems to 'picked'
-        const relatedOrderItems = await base44.entities.OrderItem.filter({ 
-          barcode: item.barcode,
-          run_id: runId 
+      // Create ledger entry (net transaction)
+      if (netAmount !== 0) {
+        await base44.entities.Ledger.create({
+          store_id: storeId,
+          store_name: store?.name || '',
+          transaction_type: netAmount > 0 ? 'debit' : 'credit',
+          amount: Math.abs(netAmount),
+          date: new Date().toISOString().split('T')[0],
+          notes: `Run #${run.run_number} - ${pickupAmount > 0 ? 'pickups' : ''}${pickupAmount > 0 && returnAmount > 0 ? ' & ' : ''}${returnAmount > 0 ? 'returns' : ''}`,
+          run_number: run.run_number,
         });
+      }
+
+      // Update run items status and handle inventory/order updates
+      for (const item of runItems) {
+        const newStatus = item.picked_qty > 0 ? (item.type === 'return' ? 'returned' : 'picked') : 'not_found';
+        await base44.entities.RunItem.update(item.id, { status: newStatus });
         
-        for (const orderItem of relatedOrderItems) {
-          await base44.entities.OrderItem.update(orderItem.id, { status });
+        if (item.type === 'pickup') {
+          // Update related OrderItems
+          const relatedOrderItems = await base44.entities.OrderItem.filter({ 
+            barcode: item.barcode,
+            run_id: runId 
+          });
+          for (const orderItem of relatedOrderItems) {
+            await base44.entities.OrderItem.update(orderItem.id, { status: newStatus });
+          }
+
+          // Update inventory (decrease for pickups)
+          if (item.picked_qty > 0) {
+            const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
+            if (products.length > 0) {
+              const product = products[0];
+              const newInventory = Math.max(0, (product.inventory || 0) - item.picked_qty);
+              await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+            }
+          }
+        } else if (item.type === 'return' && item.original_return_id) {
+          // Update Return entity
+          const returnStatus = item.picked_qty > 0 ? 'processed' : 'rejected';
+          await base44.entities.Return.update(item.original_return_id, { 
+            status: returnStatus,
+            processed_at: new Date().toISOString(),
+          });
+          
+          // Update inventory (increase for returns)
+          if (item.picked_qty > 0) {
+            const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
+            if (products.length > 0) {
+              const product = products[0];
+              const newInventory = (product.inventory || 0) + item.picked_qty;
+              await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+            }
+          }
         }
       }
 
-      toast.success(`Store confirmed - $${totalAmount.toFixed(2)} recorded`);
+      toast.success(`Store confirmed - Net: $${netAmount.toFixed(2)}`);
       navigate(createPageUrl(`RunnerPickStore?runId=${runId}`));
     } catch (error) {
       toast.error('Failed to complete store');
@@ -289,9 +330,9 @@ export default function RunnerPicking() {
       {/* Items by Style */}
       <div className="p-4 space-y-6">
         {styleGroups.map(group => (
-          <Card key={group.styleName} className="overflow-hidden">
+          <Card key={`${group.styleName}-${group.type}`} className="overflow-hidden">
             {/* Style Header */}
-            <div className="bg-gray-50 p-4 flex gap-4">
+            <div className={`p-4 flex gap-4 ${group.type === 'return' ? 'bg-purple-50' : 'bg-gray-50'}`}>
               {group.imageUrl ? (
                 <img 
                   src={group.imageUrl}
@@ -306,7 +347,12 @@ export default function RunnerPicking() {
                 </div>
               )}
               <div className="flex-1">
-                <h3 className="text-lg font-bold text-gray-900">{group.styleName}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-bold text-gray-900">{group.styleName}</h3>
+                  {group.type === 'return' && (
+                    <Badge className="bg-purple-100 text-purple-700">Return</Badge>
+                  )}
+                </div>
                 <p className="text-sm text-gray-500 mt-1">
                   {group.items.length} size{group.items.length > 1 ? 's' : ''}
                 </p>
@@ -332,7 +378,7 @@ export default function RunnerPicking() {
                         Size {item.size || 'N/A'}
                       </p>
                       <p className="text-sm text-gray-500">
-                        Need: <span className="font-bold text-gray-700">{item.target_qty}</span>
+                        {item.type === 'return' ? 'Return' : 'Need'}: <span className="font-bold text-gray-700">{item.target_qty}</span>
                       </p>
                     </div>
 
@@ -382,7 +428,6 @@ export default function RunnerPicking() {
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-lg">
         <Button 
           onClick={() => {
-            // Check if picking partially
             const isPartial = runItems.some(i => i.picked_qty > 0 && i.picked_qty < i.target_qty);
             if (isPartial) {
               const confirmMsg = "Some items are partially picked. Do you want to continue?";
@@ -393,7 +438,7 @@ export default function RunnerPicking() {
           className="w-full h-14 text-lg font-bold bg-teal-600 hover:bg-teal-700"
         >
           <CheckCircle2 className="w-6 h-6 mr-2" />
-          Finish Store Pickup
+          Finish Store
         </Button>
       </div>
 
@@ -406,7 +451,7 @@ export default function RunnerPicking() {
               Confirm Unavailable
             </DialogTitle>
             <DialogDescription>
-              This size was NOT found at the store.
+              This item was NOT {showConfirmZero?.type === 'return' ? 'returned' : 'found'} at the store.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -438,7 +483,7 @@ export default function RunnerPicking() {
       <Dialog open={showComplete} onOpenChange={setShowComplete}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Complete Store Pickup</DialogTitle>
+            <DialogTitle>Complete Store</DialogTitle>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
@@ -447,11 +492,11 @@ export default function RunnerPicking() {
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                 <p className="font-medium text-amber-800 mb-2">
                   <AlertTriangle className="w-4 h-4 inline mr-1" />
-                  {unpickedItems.length} items not picked:
+                  {unpickedItems.length} items not handled:
                 </p>
                 <ul className="text-sm text-amber-700 space-y-1">
                   {unpickedItems.slice(0, 5).map(item => (
-                    <li key={item.id}>• {item.style_name} - Size {item.size}</li>
+                    <li key={item.id}>• {item.style_name} - Size {item.size} ({item.type})</li>
                   ))}
                   {unpickedItems.length > 5 && (
                     <li>• ...and {unpickedItems.length - 5} more</li>
@@ -463,7 +508,7 @@ export default function RunnerPicking() {
             {/* Summary */}
             <div className="bg-gray-50 rounded-xl p-4">
               <div className="flex justify-between">
-                <span className="text-gray-600">Items Picked:</span>
+                <span className="text-gray-600">Items Handled:</span>
                 <span className="font-bold">{totalPicked} / {totalTarget}</span>
               </div>
             </div>

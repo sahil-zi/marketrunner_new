@@ -38,7 +38,8 @@ import OrderSelector from '@/components/admin/OrderSelector';
 
 export default function Runs() {
   const [runs, setRuns] = useState([]);
-  const [pendingItems, setPendingItems] = useState([]);
+  const [pendingOrderItems, setPendingOrderItems] = useState([]);
+  const [pendingReturnItems, setPendingReturnItems] = useState([]);
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [users, setUsers] = useState([]);
@@ -47,7 +48,8 @@ export default function Runs() {
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [assignDialog, setAssignDialog] = useState(null);
   const [selectedRunner, setSelectedRunner] = useState('');
-  const [selectedOrderItems, setSelectedOrderItems] = useState([]);
+  const [selectedPickupItems, setSelectedPickupItems] = useState([]);
+  const [selectedReturnItems, setSelectedReturnItems] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -56,15 +58,17 @@ export default function Runs() {
   async function loadData() {
     setIsLoading(true);
     try {
-      const [runsData, orderItemsData, productsData, storesData, usersData] = await Promise.all([
+      const [runsData, pendingOrderItemsData, pendingReturnItemsData, productsData, storesData, usersData] = await Promise.all([
         base44.entities.Run.list('-created_date'),
         base44.entities.OrderItem.filter({ status: 'pending' }),
+        base44.entities.Return.filter({ status: 'pending' }),
         base44.entities.ProductCatalog.list(),
         base44.entities.Store.list(),
         base44.entities.User.list(),
       ]);
       setRuns(runsData);
-      setPendingItems(orderItemsData);
+      setPendingOrderItems(pendingOrderItemsData);
+      setPendingReturnItems(pendingReturnItemsData);
       setProducts(productsData);
       setStores(storesData);
       setUsers(usersData);
@@ -82,7 +86,7 @@ export default function Runs() {
     let totalQty = 0;
     const uniqueStyles = new Set();
 
-    pendingItems.forEach(item => {
+    pendingOrderItems.forEach(item => {
       const product = productMap.get(item.barcode);
       if (product) {
         const storeId = product.store_id || 'unknown';
@@ -93,19 +97,29 @@ export default function Runs() {
       }
     });
 
+    pendingReturnItems.forEach(item => {
+      const storeId = item.store_id || 'unknown';
+      if (!storeItems[storeId]) storeItems[storeId] = 0;
+      totalQty += item.quantity || 1;
+      uniqueStyles.add(item.style_name);
+    });
+
     return {
       totalItems: totalQty,
       uniqueStyles: uniqueStyles.size,
       storeCount: Object.keys(storeItems).length,
+      pickups: pendingOrderItems.length,
+      returns: pendingReturnItems.length,
     };
-  }, [pendingItems, products]);
+  }, [pendingOrderItems, pendingReturnItems, products]);
 
   // Generate new run
   async function generateRun() {
-    const itemsToUse = selectedOrderItems.length > 0 ? selectedOrderItems : pendingItems;
+    const pickupItemsToUse = selectedPickupItems.length > 0 ? selectedPickupItems : pendingOrderItems;
+    const returnItemsToUse = selectedReturnItems.length > 0 ? selectedReturnItems : pendingReturnItems;
     
-    if (itemsToUse.length === 0) {
-      toast.error('No order items selected');
+    if (pickupItemsToUse.length === 0 && returnItemsToUse.length === 0) {
+      toast.error('No items selected');
       return;
     }
 
@@ -114,18 +128,40 @@ export default function Runs() {
       const productMap = new Map(products.map(p => [p.barcode, p]));
       const storeMap = new Map(stores.map(s => [s.id, s.name]));
 
-      // Aggregate items by barcode
-      const aggregatedItems = {};
-      itemsToUse.forEach(item => {
-        if (!aggregatedItems[item.barcode]) {
-          aggregatedItems[item.barcode] = {
+      // Aggregate pickup items by barcode and store
+      const aggregatedPickupItems = {};
+      pickupItemsToUse.forEach(item => {
+        const product = productMap.get(item.barcode);
+        const storeId = product?.store_id || 'unknown';
+        const key = `${storeId}-${item.barcode}`;
+        if (!aggregatedPickupItems[key]) {
+          aggregatedPickupItems[key] = {
             barcode: item.barcode,
             totalQty: 0,
             orderItemIds: [],
+            store_id: storeId,
           };
         }
-        aggregatedItems[item.barcode].totalQty += item.quantity || 1;
-        aggregatedItems[item.barcode].orderItemIds.push(item.id);
+        aggregatedPickupItems[key].totalQty += item.quantity || 1;
+        aggregatedPickupItems[key].orderItemIds.push(item.id);
+      });
+
+      // Aggregate return items by barcode and store
+      const aggregatedReturnItems = {};
+      returnItemsToUse.forEach(item => {
+        const key = `${item.store_id}-${item.barcode}`;
+        if (!aggregatedReturnItems[key]) {
+          aggregatedReturnItems[key] = {
+            barcode: item.barcode,
+            totalQty: 0,
+            returnItemIds: [],
+            store_id: item.store_id,
+            store_name: item.store_name,
+            style_name: item.style_name,
+          };
+        }
+        aggregatedReturnItems[key].totalQty += item.quantity || 1;
+        aggregatedReturnItems[key].returnItemIds.push(item.id);
       });
 
       // Get next run number
@@ -135,15 +171,22 @@ export default function Runs() {
       // Calculate stats
       const uniqueStyles = new Set();
       const uniqueStores = new Set();
-      let totalItems = 0;
+      let totalPickupItems = 0;
+      let totalReturnItems = 0;
 
-      Object.values(aggregatedItems).forEach(item => {
+      Object.values(aggregatedPickupItems).forEach(item => {
         const product = productMap.get(item.barcode);
         if (product) {
           uniqueStyles.add(product.style_name);
           if (product.store_id) uniqueStores.add(product.store_id);
         }
-        totalItems += item.totalQty;
+        totalPickupItems += item.totalQty;
+      });
+
+      Object.values(aggregatedReturnItems).forEach(item => {
+        uniqueStyles.add(item.style_name);
+        if (item.store_id) uniqueStores.add(item.store_id);
+        totalReturnItems += item.totalQty;
       });
 
       // Create run
@@ -152,14 +195,17 @@ export default function Runs() {
         date: new Date().toISOString().split('T')[0],
         status: 'draft',
         total_styles: uniqueStyles.size,
-        total_items: totalItems,
+        total_items: totalPickupItems + totalReturnItems,
         total_stores: uniqueStores.size,
+        has_returns: totalReturnItems > 0,
       });
 
-      // Create run items
-      const runItems = Object.values(aggregatedItems).map(item => {
+      const runItemsToCreate = [];
+
+      // Create run items for pickups
+      for (const item of Object.values(aggregatedPickupItems)) {
         const product = productMap.get(item.barcode);
-        return {
+        runItemsToCreate.push({
           run_id: run.id,
           barcode: item.barcode,
           style_name: product?.style_name || '',
@@ -167,18 +213,14 @@ export default function Runs() {
           color: product?.color || '',
           image_url: product?.image_url || '',
           cost_price: product?.cost_price || 0,
-          store_id: product?.store_id || '',
-          store_name: product?.store_id ? storeMap.get(product.store_id) || '' : '',
+          store_id: item.store_id,
+          store_name: item.store_id ? storeMap.get(item.store_id) || '' : '',
           target_qty: item.totalQty,
           picked_qty: 0,
           status: 'pending',
-        };
-      });
+          type: 'pickup',
+        });
 
-      await base44.entities.RunItem.bulkCreate(runItems);
-
-      // Update order items to assigned
-      for (const item of Object.values(aggregatedItems)) {
         for (const orderItemId of item.orderItemIds) {
           await base44.entities.OrderItem.update(orderItemId, {
             status: 'assigned_to_run',
@@ -187,9 +229,41 @@ export default function Runs() {
         }
       }
 
-      toast.success(`Run #${runNumber} created with ${totalItems} items from ${uniqueStyles.size} styles`);
+      // Create run items for returns
+      for (const item of Object.values(aggregatedReturnItems)) {
+        const product = productMap.get(item.barcode);
+        runItemsToCreate.push({
+          run_id: run.id,
+          barcode: item.barcode,
+          style_name: item.style_name || product?.style_name || '',
+          size: product?.size || '',
+          color: product?.color || '',
+          image_url: product?.image_url || '',
+          cost_price: product?.cost_price || 0,
+          store_id: item.store_id,
+          store_name: item.store_name || storeMap.get(item.store_id) || '',
+          target_qty: item.totalQty,
+          picked_qty: 0,
+          status: 'pending',
+          type: 'return',
+          original_return_id: item.returnItemIds[0], // Store first return ID as reference
+        });
+
+        for (const returnItemId of item.returnItemIds) {
+          await base44.entities.Return.update(returnItemId, {
+            status: 'assigned_to_run',
+            run_id: run.id,
+            run_number: runNumber,
+          });
+        }
+      }
+
+      await base44.entities.RunItem.bulkCreate(runItemsToCreate);
+
+      toast.success(`Run #${runNumber} created with ${totalPickupItems} pickups and ${totalReturnItems} returns`);
       setShowGenerateDialog(false);
-      setSelectedOrderItems([]);
+      setSelectedPickupItems([]);
+      setSelectedReturnItems([]);
       loadData();
     } catch (error) {
       toast.error('Failed to generate run');
@@ -236,7 +310,10 @@ export default function Runs() {
     draft: { icon: Clock, color: 'bg-gray-100 text-gray-700', label: 'Draft' },
     active: { icon: Truck, color: 'bg-amber-100 text-amber-700', label: 'Active' },
     completed: { icon: CheckCircle2, color: 'bg-green-100 text-green-700', label: 'Completed' },
+    dropped_off: { icon: CheckCircle2, color: 'bg-teal-100 text-teal-700', label: 'Dropped Off' },
   };
+
+  const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
 
   return (
     <div className="space-y-8">
@@ -244,11 +321,11 @@ export default function Runs() {
       <div className="flex flex-col sm:flex-row justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Runs</h1>
-          <p className="text-gray-500 mt-1">Consolidate orders for pickup runs</p>
+          <p className="text-gray-500 mt-1">Consolidate orders & returns for pickup runs</p>
         </div>
         <Button 
           onClick={() => setShowGenerateDialog(true)}
-          disabled={pendingItems.length === 0}
+          disabled={!hasPendingItems}
           className="bg-teal-600 hover:bg-teal-700"
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -257,7 +334,7 @@ export default function Runs() {
       </div>
 
       {/* Pending Summary */}
-      {pendingItems.length > 0 && (
+      {hasPendingItems && (
         <Card className="border-teal-200 bg-teal-50">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -269,6 +346,7 @@ export default function Runs() {
                   <p className="font-semibold text-teal-900">Pending Items Ready for Consolidation</p>
                   <p className="text-sm text-teal-700">
                     {pendingStats.totalItems} items • {pendingStats.uniqueStyles} styles • {pendingStats.storeCount} stores
+                    {pendingStats.returns > 0 && ` • ${pendingStats.returns} returns`}
                   </p>
                 </div>
               </div>
@@ -293,7 +371,7 @@ export default function Runs() {
           <CardContent className="text-center py-12">
             <Truck className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500 mb-4">No runs created yet</p>
-            {pendingItems.length > 0 && (
+            {hasPendingItems && (
               <Button 
                 onClick={() => setShowGenerateDialog(true)}
                 className="bg-teal-600 hover:bg-teal-700"
@@ -324,6 +402,9 @@ export default function Runs() {
                             <StatusIcon className="w-3 h-3 mr-1" />
                             {status.label}
                           </Badge>
+                          {run.has_returns && (
+                            <Badge className="bg-purple-100 text-purple-700">Has Returns</Badge>
+                          )}
                         </div>
                         <p className="text-sm text-gray-500 mt-1">{run.date}</p>
                         <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
@@ -379,26 +460,44 @@ export default function Runs() {
 
       {/* Generate Run Dialog */}
       <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh]">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Generate New Run</DialogTitle>
             <DialogDescription>
-              Select the order items to include in this run. Leave unselected to use all pending items.
+              Select items to include in this run. Leave unselected to use all pending items.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <OrderSelector
-              orderItems={pendingItems}
-              products={products}
-              stores={stores}
-              selectedItems={selectedOrderItems}
-              onSelectionChange={setSelectedOrderItems}
-            />
+          <div className="py-4 space-y-6">
+            {pendingOrderItems.length > 0 && (
+              <>
+                <h3 className="text-lg font-semibold text-gray-900">Pickup Items ({pendingOrderItems.length})</h3>
+                <OrderSelector
+                  orderItems={pendingOrderItems}
+                  products={products}
+                  stores={stores}
+                  selectedItems={selectedPickupItems}
+                  onSelectionChange={setSelectedPickupItems}
+                />
+              </>
+            )}
+            {pendingReturnItems.length > 0 && (
+              <>
+                <h3 className="text-lg font-semibold text-gray-900 mt-6">Return Items ({pendingReturnItems.length})</h3>
+                <OrderSelector
+                  orderItems={pendingReturnItems}
+                  products={products}
+                  stores={stores}
+                  selectedItems={selectedReturnItems}
+                  onSelectionChange={setSelectedReturnItems}
+                />
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => {
               setShowGenerateDialog(false);
-              setSelectedOrderItems([]);
+              setSelectedPickupItems([]);
+              setSelectedReturnItems([]);
             }}>
               Cancel
             </Button>
@@ -413,7 +512,7 @@ export default function Runs() {
                   Generating...
                 </>
               ) : (
-                `Generate Run (${selectedOrderItems.length || pendingItems.length} items)`
+                `Generate Run (${(selectedPickupItems.length || pendingOrderItems.length) + (selectedReturnItems.length || pendingReturnItems.length)} items)`
               )}
             </Button>
           </DialogFooter>

@@ -104,7 +104,6 @@ export default function RunDetails() {
   async function printLabels() {
     toast.info('Generating PDF labels...');
     
-    // Sort items by store name, then style name
     const sortedItems = [...runItems].sort((a, b) => {
       if (a.store_name !== b.store_name) {
         return (a.store_name || '').localeCompare(b.store_name || '');
@@ -112,9 +111,9 @@ export default function RunDetails() {
       return (a.style_name || '').localeCompare(b.style_name || '');
     });
 
-    // Create a simple text-based label preview (in real app, use jsPDF)
     const labelContent = sortedItems.map(item => `
 =================================
+${item.type === 'return' ? 'RETURN' : 'PICKUP'}
 BARCODE: ${item.barcode}
 Style: ${item.style_name}
 Size: ${item.size || 'N/A'}  |  Qty: ${item.target_qty}
@@ -123,7 +122,6 @@ Run: #${run.run_number}
 =================================
     `).join('\n');
 
-    // Create blob and download
     const blob = new Blob([labelContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -139,6 +137,7 @@ Run: #${run.run_number}
     draft: { color: 'bg-gray-100 text-gray-700', label: 'Draft' },
     active: { color: 'bg-amber-100 text-amber-700', label: 'Active' },
     completed: { color: 'bg-green-100 text-green-700', label: 'Completed' },
+    dropped_off: { color: 'bg-teal-100 text-teal-700', label: 'Dropped Off' },
   };
 
   if (isLoading) {
@@ -162,6 +161,8 @@ Run: #${run.run_number}
   }
 
   const status = statusConfig[run.status] || statusConfig.draft;
+  const pickupItems = runItems.filter(item => item.type === 'pickup');
+  const returnItems = runItems.filter(item => item.type === 'return');
 
   return (
     <div className="space-y-8">
@@ -230,7 +231,8 @@ Run: #${run.run_number}
       <Tabs defaultValue="stores" className="space-y-6">
         <TabsList>
           <TabsTrigger value="stores">By Store</TabsTrigger>
-          <TabsTrigger value="items">All Items</TabsTrigger>
+          <TabsTrigger value="pickup_items">Pickup Items ({pickupItems.length})</TabsTrigger>
+          <TabsTrigger value="return_items">Return Items ({returnItems.length})</TabsTrigger>
           <TabsTrigger value="confirmations">Confirmations</TabsTrigger>
         </TabsList>
 
@@ -296,7 +298,12 @@ Run: #${run.run_number}
                           </div>
                         )}
                         <div className="flex-1">
-                          <p className="font-medium text-gray-900">{item.style_name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-gray-900">{item.style_name}</p>
+                            {item.type === 'return' && (
+                              <Badge className="bg-purple-100 text-purple-700 text-xs">Return</Badge>
+                            )}
+                          </div>
                           <p className="text-sm text-gray-500">
                             Size: {item.size || 'N/A'} • {item.barcode}
                           </p>
@@ -321,62 +328,126 @@ Run: #${run.run_number}
           })}
         </TabsContent>
 
-        {/* All Items View */}
-        <TabsContent value="items">
+        {/* Pickup Items View */}
+        <TabsContent value="pickup_items">
           <Card>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-16">Image</TableHead>
-                    <TableHead>Style</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Store</TableHead>
-                    <TableHead>Barcode</TableHead>
-                    <TableHead className="text-right">Target</TableHead>
-                    <TableHead className="text-right">Picked</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {runItems.map(item => (
-                    <TableRow key={item.id}>
-                      <TableCell>
-                        {item.image_url ? (
-                          <img 
-                            src={item.image_url}
-                            alt={item.style_name}
-                            className="w-10 h-10 object-cover rounded-lg"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                            <ImageIcon className="w-5 h-5 text-gray-400" />
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-medium">{item.style_name}</TableCell>
-                      <TableCell>{item.size || '—'}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{item.store_name}</Badge>
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">{item.barcode}</TableCell>
-                      <TableCell className="text-right">{item.target_qty}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {item.picked_qty}
-                      </TableCell>
-                      <TableCell>
-                        {item.status === 'picked' ? (
-                          <Badge className="bg-green-100 text-green-700">Picked</Badge>
-                        ) : item.status === 'not_found' ? (
-                          <Badge className="bg-red-100 text-red-700">Not Found</Badge>
-                        ) : (
-                          <Badge className="bg-gray-100 text-gray-700">Pending</Badge>
-                        )}
-                      </TableCell>
+              {pickupItems.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">No pickup items in this run</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-16">Image</TableHead>
+                      <TableHead>Style</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead>Store</TableHead>
+                      <TableHead>Barcode</TableHead>
+                      <TableHead className="text-right">Target</TableHead>
+                      <TableHead className="text-right">Picked</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {pickupItems.map(item => (
+                      <TableRow key={item.id}>
+                        <TableCell>
+                          {item.image_url ? (
+                            <img 
+                              src={item.image_url}
+                              alt={item.style_name}
+                              className="w-10 h-10 object-cover rounded-lg"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                              <ImageIcon className="w-5 h-5 text-gray-400" />
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">{item.style_name}</TableCell>
+                        <TableCell>{item.size || '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{item.store_name}</Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{item.barcode}</TableCell>
+                        <TableCell className="text-right">{item.target_qty}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {item.picked_qty}
+                        </TableCell>
+                        <TableCell>
+                          {item.status === 'picked' ? (
+                            <Badge className="bg-green-100 text-green-700">Picked</Badge>
+                          ) : item.status === 'not_found' ? (
+                            <Badge className="bg-red-100 text-red-700">Not Found</Badge>
+                          ) : (
+                            <Badge className="bg-gray-100 text-gray-700">Pending</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Return Items View */}
+        <TabsContent value="return_items">
+          <Card>
+            <CardContent className="p-0">
+              {returnItems.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">No return items in this run</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-16">Image</TableHead>
+                      <TableHead>Style</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead>Store</TableHead>
+                      <TableHead>Barcode</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {returnItems.map(item => (
+                      <TableRow key={item.id}>
+                        <TableCell>
+                          {item.image_url ? (
+                            <img 
+                              src={item.image_url}
+                              alt={item.style_name}
+                              className="w-10 h-10 object-cover rounded-lg"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                              <ImageIcon className="w-5 h-5 text-gray-400" />
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">{item.style_name}</TableCell>
+                        <TableCell>{item.size || '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{item.store_name}</Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{item.barcode}</TableCell>
+                        <TableCell className="text-right">{item.target_qty}</TableCell>
+                        <TableCell>
+                          {item.status === 'returned' ? (
+                            <Badge className="bg-purple-100 text-purple-700">Returned</Badge>
+                          ) : item.status === 'not_found' ? (
+                            <Badge className="bg-red-100 text-red-700">Not Returned</Badge>
+                          ) : (
+                            <Badge className="bg-gray-100 text-gray-700">Pending</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
