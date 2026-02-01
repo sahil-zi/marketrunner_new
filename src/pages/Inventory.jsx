@@ -11,12 +11,14 @@ import {
   X,
   Loader2,
   Image as ImageIcon,
-  Download
+  Download,
+  Printer
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -43,6 +45,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import CSVUploader from '@/components/admin/CSVUploader';
+import LabelPrinter from '@/components/admin/LabelPrinter';
 
 export default function Inventory() {
   const [products, setProducts] = useState([]);
@@ -55,6 +58,7 @@ export default function Inventory() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [selectedProducts, setSelectedProducts] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -76,10 +80,8 @@ export default function Inventory() {
     }
   }
 
-  // Get unique categories from products
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
 
-  // Filter products
   const filteredProducts = products.filter(product => {
     const matchesSearch = 
       product.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -89,7 +91,6 @@ export default function Inventory() {
     return matchesSearch && matchesStore && matchesCategory;
   });
 
-  // Validate products CSV
   async function validateProducts(rows, headers) {
     const errors = [];
     const warnings = [];
@@ -154,9 +155,7 @@ export default function Inventory() {
     };
   }
 
-  // Import products from CSV
   async function importProducts(rows, mode) {
-    // First, create any new stores
     const existingStoreNames = new Map(stores.map(s => [s.name.toLowerCase(), s.id]));
     const newStoreNames = [...new Set(
       rows
@@ -173,7 +172,6 @@ export default function Inventory() {
       });
     }
 
-    // Prepare products for import
     const productsToCreate = [];
     const productsToUpdate = [];
     const existingBarcodes = new Map(products.map(p => [p.barcode, p.id]));
@@ -208,12 +206,10 @@ export default function Inventory() {
       }
     });
 
-    // Create new products
     if (productsToCreate.length > 0) {
       await base44.entities.ProductCatalog.bulkCreate(productsToCreate);
     }
 
-    // Update existing products
     for (const product of productsToUpdate) {
       await base44.entities.ProductCatalog.update(product.id, product);
     }
@@ -222,9 +218,7 @@ export default function Inventory() {
     loadData();
   }
 
-  // Save product (create or update)
   async function saveProduct(productData) {
-    // Validate store exists
     if (productData.store_id && !stores.find(s => s.id === productData.store_id)) {
       toast.error('Selected store does not exist');
       return;
@@ -249,7 +243,6 @@ export default function Inventory() {
     }
   }
 
-  // Delete product
   async function deleteProduct(id) {
     try {
       await base44.entities.ProductCatalog.delete(id);
@@ -266,7 +259,6 @@ export default function Inventory() {
     return store?.name || '—';
   };
 
-  // Export products to CSV
   function exportProducts() {
     const headers = ['Barcode', 'Style', 'Size', 'Color', 'ImageURL', 'Cost', 'RRP', 'Family', 'Category', 'SubCat', 'Occasion', 'StoreName'];
     const rows = products.map(p => [
@@ -295,6 +287,23 @@ export default function Inventory() {
     toast.success('Products exported');
   }
 
+  const toggleSelectProduct = (product) => {
+    const isSelected = selectedProducts.some(p => p.id === product.id);
+    if (isSelected) {
+      setSelectedProducts(selectedProducts.filter(p => p.id !== product.id));
+    } else {
+      setSelectedProducts([...selectedProducts, product]);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedProducts.length === filteredProducts.length) {
+      setSelectedProducts([]);
+    } else {
+      setSelectedProducts(filteredProducts);
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -303,13 +312,22 @@ export default function Inventory() {
           <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
           <p className="text-gray-500 mt-1">Manage your product catalog</p>
         </div>
-        <Button 
-          onClick={() => { setEditingProduct({}); setIsDialogOpen(true); }}
-          className="bg-teal-600 hover:bg-teal-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Product
-        </Button>
+        <div className="flex gap-2">
+          {selectedProducts.length > 0 && (
+            <LabelPrinter 
+              items={selectedProducts.map(p => ({ ...p, quantity: 1 }))} 
+              buttonText={`Print Labels (${selectedProducts.length})`}
+              variant="outline"
+            />
+          )}
+          <Button 
+            onClick={() => { setEditingProduct({}); setIsDialogOpen(true); }}
+            className="bg-teal-600 hover:bg-teal-700"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Product
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="browse" className="space-y-6">
@@ -382,6 +400,12 @@ export default function Inventory() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-12">
+                          <Checkbox 
+                            checked={selectedProducts.length === filteredProducts.length && filteredProducts.length > 0}
+                            onCheckedChange={toggleSelectAll}
+                          />
+                        </TableHead>
                         <TableHead className="w-16">Image</TableHead>
                         <TableHead>Barcode</TableHead>
                         <TableHead>Style</TableHead>
@@ -397,6 +421,12 @@ export default function Inventory() {
                     <TableBody>
                       {filteredProducts.map(product => (
                         <TableRow key={product.id}>
+                          <TableCell>
+                            <Checkbox 
+                              checked={selectedProducts.some(p => p.id === product.id)}
+                              onCheckedChange={() => toggleSelectProduct(product)}
+                            />
+                          </TableCell>
                           <TableCell>
                             {product.image_url ? (
                               <img 

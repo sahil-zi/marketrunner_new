@@ -18,7 +18,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-
 import {
   Dialog,
   DialogContent,
@@ -84,7 +83,6 @@ export default function RunnerPicking() {
     }
   }
 
-  // Group items by style and type
   const styleGroups = React.useMemo(() => {
     const groups = {};
     
@@ -108,7 +106,6 @@ export default function RunnerPicking() {
     });
   }, [runItems]);
 
-  // Update picked quantity
   async function updatePickedQty(item, delta) {
     const newQty = Math.max(0, Math.min((item.picked_qty || 0) + delta, item.target_qty + 10));
     
@@ -122,7 +119,6 @@ export default function RunnerPicking() {
     }
   }
 
-  // Confirm zero quantity
   const startHold = (item) => {
     setShowConfirmZero(item);
     setHoldProgress(0);
@@ -163,7 +159,6 @@ export default function RunnerPicking() {
     setHoldProgress(0);
   };
 
-  // Handle receipt image
   const handleImageSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -182,7 +177,6 @@ export default function RunnerPicking() {
     setReceiptPreview(URL.createObjectURL(file));
   };
 
-  // Complete store pickup
   async function completeStore() {
     if (!receiptImage) {
       toast.error('Please upload a receipt photo');
@@ -191,10 +185,8 @@ export default function RunnerPicking() {
 
     setIsUploading(true);
     try {
-      // Upload receipt image
       const { file_url } = await base44.integrations.Core.UploadFile({ file: receiptImage });
 
-      // Calculate amounts separately
       const pickupAmount = runItems
         .filter(item => item.type === 'pickup')
         .reduce((sum, item) => sum + ((item.picked_qty || 0) * (item.cost_price || 0)), 0);
@@ -205,7 +197,6 @@ export default function RunnerPicking() {
       
       const netAmount = pickupAmount - returnAmount;
 
-      // Create confirmation
       await base44.entities.RunConfirmation.create({
         run_id: runId,
         store_id: storeId,
@@ -216,7 +207,6 @@ export default function RunnerPicking() {
         notes,
       });
 
-      // Create ledger entry (net transaction)
       if (netAmount !== 0) {
         await base44.entities.Ledger.create({
           store_id: storeId,
@@ -229,13 +219,11 @@ export default function RunnerPicking() {
         });
       }
 
-      // Update run items status and handle inventory/order updates
       for (const item of runItems) {
         const newStatus = item.picked_qty > 0 ? (item.type === 'return' ? 'returned' : 'picked') : 'not_found';
         await base44.entities.RunItem.update(item.id, { status: newStatus });
         
         if (item.type === 'pickup') {
-          // Update related OrderItems
           const relatedOrderItems = await base44.entities.OrderItem.filter({ 
             barcode: item.barcode,
             run_id: runId 
@@ -244,7 +232,6 @@ export default function RunnerPicking() {
             await base44.entities.OrderItem.update(orderItem.id, { status: newStatus });
           }
 
-          // Update inventory (decrease for pickups)
           if (item.picked_qty > 0) {
             const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
             if (products.length > 0) {
@@ -254,14 +241,12 @@ export default function RunnerPicking() {
             }
           }
         } else if (item.type === 'return' && item.original_return_id) {
-          // Update Return entity
           const returnStatus = item.picked_qty > 0 ? 'processed' : 'rejected';
           await base44.entities.Return.update(item.original_return_id, { 
             status: returnStatus,
             processed_at: new Date().toISOString(),
           });
           
-          // Update inventory (increase for returns)
           if (item.picked_qty > 0) {
             const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
             if (products.length > 0) {
@@ -283,12 +268,10 @@ export default function RunnerPicking() {
     }
   }
 
-  // Calculate progress
   const totalTarget = runItems.reduce((sum, i) => sum + (i.target_qty || 0), 0);
   const totalPicked = runItems.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
   const progress = totalTarget > 0 ? Math.round((totalPicked / totalTarget) * 100) : 0;
 
-  // Check for unpicked items
   const unpickedItems = runItems.filter(i => i.target_qty > 0 && (i.picked_qty || 0) === 0);
 
   if (isLoading) {
@@ -315,7 +298,7 @@ export default function RunnerPicking() {
               <h1 className="text-xl font-bold text-gray-900">{store?.name || 'Store'}</h1>
             </div>
             <p className="text-gray-500 text-sm">
-              {totalPicked} / {totalTarget} items picked
+              {totalPicked} / {totalTarget} items handled
             </p>
           </div>
         </div>

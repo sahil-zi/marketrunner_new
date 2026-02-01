@@ -13,7 +13,8 @@ import {
   Package,
   Store,
   Play,
-  Eye
+  Eye,
+  Printer
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +36,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import OrderSelector from '@/components/admin/OrderSelector';
+import LabelPrinter from '@/components/admin/LabelPrinter';
 
 export default function Runs() {
   const [runs, setRuns] = useState([]);
@@ -79,7 +81,6 @@ export default function Runs() {
     }
   }
 
-  // Calculate pending items summary
   const pendingStats = React.useMemo(() => {
     const productMap = new Map(products.map(p => [p.barcode, p]));
     const storeItems = {};
@@ -113,7 +114,6 @@ export default function Runs() {
     };
   }, [pendingOrderItems, pendingReturnItems, products]);
 
-  // Generate new run
   async function generateRun() {
     const pickupItemsToUse = selectedPickupItems.length > 0 ? selectedPickupItems : pendingOrderItems;
     const returnItemsToUse = selectedReturnItems.length > 0 ? selectedReturnItems : pendingReturnItems;
@@ -128,7 +128,6 @@ export default function Runs() {
       const productMap = new Map(products.map(p => [p.barcode, p]));
       const storeMap = new Map(stores.map(s => [s.id, s.name]));
 
-      // Aggregate pickup items by barcode and store
       const aggregatedPickupItems = {};
       pickupItemsToUse.forEach(item => {
         const product = productMap.get(item.barcode);
@@ -146,7 +145,6 @@ export default function Runs() {
         aggregatedPickupItems[key].orderItemIds.push(item.id);
       });
 
-      // Aggregate return items by barcode and store
       const aggregatedReturnItems = {};
       returnItemsToUse.forEach(item => {
         const key = `${item.store_id}-${item.barcode}`;
@@ -164,11 +162,9 @@ export default function Runs() {
         aggregatedReturnItems[key].returnItemIds.push(item.id);
       });
 
-      // Get next run number
       const maxRunNumber = runs.reduce((max, r) => Math.max(max, r.run_number || 0), 0);
       const runNumber = maxRunNumber + 1;
 
-      // Calculate stats
       const uniqueStyles = new Set();
       const uniqueStores = new Set();
       let totalPickupItems = 0;
@@ -189,7 +185,6 @@ export default function Runs() {
         totalReturnItems += item.totalQty;
       });
 
-      // Create run
       const run = await base44.entities.Run.create({
         run_number: runNumber,
         date: new Date().toISOString().split('T')[0],
@@ -202,7 +197,6 @@ export default function Runs() {
 
       const runItemsToCreate = [];
 
-      // Create run items for pickups
       for (const item of Object.values(aggregatedPickupItems)) {
         const product = productMap.get(item.barcode);
         runItemsToCreate.push({
@@ -229,7 +223,6 @@ export default function Runs() {
         }
       }
 
-      // Create run items for returns
       for (const item of Object.values(aggregatedReturnItems)) {
         const product = productMap.get(item.barcode);
         runItemsToCreate.push({
@@ -246,7 +239,7 @@ export default function Runs() {
           picked_qty: 0,
           status: 'pending',
           type: 'return',
-          original_return_id: item.returnItemIds[0], // Store first return ID as reference
+          original_return_id: item.returnItemIds[0],
         });
 
         for (const returnItemId of item.returnItemIds) {
@@ -273,7 +266,6 @@ export default function Runs() {
     }
   }
 
-  // Assign runner to run
   async function assignRunner(runId) {
     if (!selectedRunner) {
       toast.error('Please select a runner');
@@ -295,7 +287,6 @@ export default function Runs() {
     }
   }
 
-  // Activate run
   async function activateRun(runId) {
     try {
       await base44.entities.Run.update(runId, { status: 'active' });
@@ -303,6 +294,24 @@ export default function Runs() {
       loadData();
     } catch (error) {
       toast.error('Failed to activate run');
+    }
+  }
+
+  async function printRunLabels(runId) {
+    try {
+      const runItems = await base44.entities.RunItem.filter({ run_id: runId });
+      if (runItems.length === 0) {
+        toast.error('No items in this run');
+        return;
+      }
+      
+      // Use LabelPrinter component logic
+      const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
+      const zpl = generateZPL(runItems);
+      await printToZebra(zpl);
+    } catch (error) {
+      toast.error('Failed to print labels');
+      console.error(error);
     }
   }
 
@@ -425,16 +434,26 @@ export default function Runs() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => printRunLabels(run.id)}
+                      >
+                        <Printer className="w-4 h-4 mr-2" />
+                        Print Labels
+                      </Button>
                       {run.status === 'draft' && (
                         <>
                           <Button
                             variant="outline"
+                            size="sm"
                             onClick={() => setAssignDialog(run)}
                           >
                             {run.runner_id ? 'Reassign' : 'Assign Runner'}
                           </Button>
                           <Button
+                            size="sm"
                             onClick={() => activateRun(run.id)}
                             className="bg-teal-600 hover:bg-teal-700"
                           >
@@ -444,7 +463,7 @@ export default function Runs() {
                         </>
                       )}
                       <Link to={createPageUrl(`RunDetails?id=${run.id}`)}>
-                        <Button variant="outline">
+                        <Button variant="outline" size="sm">
                           <Eye className="w-4 h-4 mr-2" />
                           View
                         </Button>
