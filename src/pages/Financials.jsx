@@ -484,70 +484,71 @@ export default function Financials() {
                   <p className="text-gray-500">No transactions found</p>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Store</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Run #</TableHead>
-                      <TableHead>Notes</TableHead>
-                      <TableHead>Receipt</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {currentLedger.map(entry => {
-                      const confirmation = entry.run_confirmation_id 
-                        ? getConfirmation(entry.run_confirmation_id)
-                        : null;
-                      
-                      return (
-                        <TableRow key={entry.id}>
-                          <TableCell>{entry.date}</TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">{entry.store_name}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={
-                              entry.transaction_type === 'credit'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
-                            }>
-                              {entry.transaction_type === 'credit' ? (
-                                <TrendingUp className="w-3 h-3 mr-1" />
-                              ) : (
-                                <TrendingDown className="w-3 h-3 mr-1" />
-                              )}
-                              {entry.transaction_type}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className={`text-right font-medium ${
-                            entry.transaction_type === 'credit' ? 'text-green-600' : 'text-red-600'
-                          }`}>
-                            AED {entry.amount?.toFixed(2)}
-                          </TableCell>
-                          <TableCell>
-                            {entry.run_number ? `#${entry.run_number}` : '—'}
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate">
-                            {entry.notes || '—'}
-                          </TableCell>
-                          <TableCell>
-                            {confirmation?.receipt_image_url ? (
-                              <img
-                                src={confirmation.receipt_image_url}
-                                alt="Receipt"
-                                className="w-10 h-10 object-cover rounded cursor-pointer"
-                                onClick={() => window.open(confirmation.receipt_image_url, '_blank')}
-                              />
-                            ) : '—'}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Store</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead>Run #</TableHead>
+                        <TableHead>Notes</TableHead>
+                        <TableHead>Receipt</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentLedger.map(entry => {
+                        const confirmation = entry.run_confirmation_id 
+                          ? getConfirmation(entry.run_confirmation_id)
+                          : null;
+                        
+                        return (
+                          <TableRow key={entry.id}>
+                            <TableCell>{entry.date}</TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">{entry.store_name}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={
+                                entry.transaction_type === 'credit'
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-red-100 text-red-700'
+                              }>
+                                {entry.transaction_type === 'credit' ? (
+                                  <TrendingUp className="w-3 h-3 mr-1" />
+                                ) : (
+                                  <TrendingDown className="w-3 h-3 mr-1" />
+                                )}
+                                {entry.transaction_type}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${
+                              entry.transaction_type === 'credit' ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              AED {entry.amount?.toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                              {entry.run_number ? `#${entry.run_number}` : '—'}
+                            </TableCell>
+                            <TableCell className="max-w-xs truncate">
+                              {entry.notes || '—'}
+                            </TableCell>
+                            <TableCell>
+                              {confirmation?.receipt_image_url ? (
+                                <img
+                                  src={confirmation.receipt_image_url}
+                                  alt="Receipt"
+                                  className="w-10 h-10 object-cover rounded cursor-pointer"
+                                  onClick={() => window.open(confirmation.receipt_image_url, '_blank')}
+                                />
+                              ) : '—'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
 
                   <div className="flex items-center justify-between p-4">
                     <div className="flex items-center gap-2">
@@ -591,6 +592,7 @@ export default function Financials() {
                       </Button>
                     </div>
                   </div>
+                </div>
               )}
             </CardContent>
           </Card>
