@@ -114,6 +114,7 @@ export default function OrderSelector({
           onSelectedChange={setSelectedStoreIds}
           placeholder="Filter by stores..."
           className="w-full sm:w-60"
+          showSelectAll={true}
         />
       </div>
 

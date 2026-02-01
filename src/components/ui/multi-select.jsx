@@ -15,7 +15,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 export function MultiSelect({
   options,
@@ -23,6 +22,7 @@ export function MultiSelect({
   onSelectedChange,
   placeholder = "Select items...",
   className,
+  showSelectAll = false,
   ...props
 }) {
   const [open, setOpen] = React.useState(false);
@@ -32,6 +32,14 @@ export function MultiSelect({
       ? selected.filter((item) => item !== value)
       : [...selected, value];
     onSelectedChange(newSelected);
+  };
+
+  const selectAll = () => {
+    onSelectedChange(options.map(opt => opt.value));
+  };
+
+  const unselectAll = () => {
+    onSelectedChange([]);
   };
 
   return (
@@ -54,6 +62,26 @@ export function MultiSelect({
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
         <Command>
           <CommandInput placeholder="Search..." />
+          {showSelectAll && (
+            <div className="flex gap-2 p-2 border-b">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={selectAll}
+                className="flex-1"
+              >
+                Select All
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={unselectAll}
+                className="flex-1"
+              >
+                Unselect All
+              </Button>
+            </div>
+          )}
           <CommandList>
             <CommandEmpty>No item found.</CommandEmpty>
             <CommandGroup>
