@@ -52,6 +52,7 @@ export default function Runs() {
   const [selectedRunner, setSelectedRunner] = useState('');
   const [selectedPickupItems, setSelectedPickupItems] = useState([]);
   const [selectedReturnItems, setSelectedReturnItems] = useState([]);
+  const [runItemsCache, setRunItemsCache] = useState({});
 
   useEffect(() => {
     loadData();
@@ -81,6 +82,16 @@ export default function Runs() {
     }
   }
 
+  // Load run items for a specific run
+  async function loadRunItems(runId) {
+    if (runItemsCache[runId]) return runItemsCache[runId];
+    
+    const items = await base44.entities.RunItem.filter({ run_id: runId });
+    setRunItemsCache(prev => ({ ...prev, [runId]: items }));
+    return items;
+  }
+
+  // Calculate pending items summary
   const pendingStats = React.useMemo(() => {
     const productMap = new Map(products.map(p => [p.barcode, p]));
     const storeItems = {};
@@ -114,6 +125,7 @@ export default function Runs() {
     };
   }, [pendingOrderItems, pendingReturnItems, products]);
 
+  // Generate new run
   async function generateRun() {
     const pickupItemsToUse = selectedPickupItems.length > 0 ? selectedPickupItems : pendingOrderItems;
     const returnItemsToUse = selectedReturnItems.length > 0 ? selectedReturnItems : pendingReturnItems;
@@ -128,6 +140,7 @@ export default function Runs() {
       const productMap = new Map(products.map(p => [p.barcode, p]));
       const storeMap = new Map(stores.map(s => [s.id, s.name]));
 
+      // Aggregate pickup items by barcode and store
       const aggregatedPickupItems = {};
       pickupItemsToUse.forEach(item => {
         const product = productMap.get(item.barcode);
@@ -145,6 +158,7 @@ export default function Runs() {
         aggregatedPickupItems[key].orderItemIds.push(item.id);
       });
 
+      // Aggregate return items by barcode and store
       const aggregatedReturnItems = {};
       returnItemsToUse.forEach(item => {
         const key = `${item.store_id}-${item.barcode}`;
@@ -162,9 +176,11 @@ export default function Runs() {
         aggregatedReturnItems[key].returnItemIds.push(item.id);
       });
 
+      // Get next run number
       const maxRunNumber = runs.reduce((max, r) => Math.max(max, r.run_number || 0), 0);
       const runNumber = maxRunNumber + 1;
 
+      // Calculate stats
       const uniqueStyles = new Set();
       const uniqueStores = new Set();
       let totalPickupItems = 0;
@@ -185,6 +201,7 @@ export default function Runs() {
         totalReturnItems += item.totalQty;
       });
 
+      // Create run
       const run = await base44.entities.Run.create({
         run_number: runNumber,
         date: new Date().toISOString().split('T')[0],
@@ -197,6 +214,7 @@ export default function Runs() {
 
       const runItemsToCreate = [];
 
+      // Create run items for pickups
       for (const item of Object.values(aggregatedPickupItems)) {
         const product = productMap.get(item.barcode);
         runItemsToCreate.push({
@@ -223,6 +241,7 @@ export default function Runs() {
         }
       }
 
+      // Create run items for returns
       for (const item of Object.values(aggregatedReturnItems)) {
         const product = productMap.get(item.barcode);
         runItemsToCreate.push({
@@ -266,6 +285,7 @@ export default function Runs() {
     }
   }
 
+  // Assign runner to run
   async function assignRunner(runId) {
     if (!selectedRunner) {
       toast.error('Please select a runner');
@@ -287,6 +307,7 @@ export default function Runs() {
     }
   }
 
+  // Activate run
   async function activateRun(runId) {
     try {
       await base44.entities.Run.update(runId, { status: 'active' });
@@ -297,22 +318,18 @@ export default function Runs() {
     }
   }
 
+  // Print labels for a run
   async function printRunLabels(runId) {
-    try {
-      const runItems = await base44.entities.RunItem.filter({ run_id: runId });
-      if (runItems.length === 0) {
-        toast.error('No items in this run');
-        return;
-      }
-      
-      // Use LabelPrinter component logic
-      const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
-      const zpl = generateZPL(runItems);
-      await printToZebra(zpl);
-    } catch (error) {
-      toast.error('Failed to print labels');
-      console.error(error);
+    const items = await loadRunItems(runId);
+    if (items.length === 0) {
+      toast.error('No items in this run');
+      return;
     }
+    
+    // Use the LabelPrinter component logic
+    const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
+    const zpl = generateZPL(items);
+    await printToZebra(zpl);
   }
 
   const statusConfig = {
