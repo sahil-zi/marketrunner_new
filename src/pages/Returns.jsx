@@ -336,87 +336,88 @@ export default function Returns() {
                   <p className="text-gray-500">No returns found</p>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Store</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-32">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {currentReturns.map(ret => {
-                      const status = statusConfig[ret.status] || statusConfig.pending;
-                      const StatusIcon = status.icon;
-                      
-                      return (
-                        <TableRow key={ret.id}>
-                          <TableCell>
-                            {ret.created_date 
-                              ? new Date(ret.created_date).toLocaleDateString()
-                              : '—'
-                            }
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">{ret.store_name}</Badge>
-                          </TableCell>
-                          <TableCell className="font-medium">{ret.style_name}</TableCell>
-                          <TableCell>{ret.size || '—'}</TableCell>
-                          <TableCell className="text-right">{ret.quantity}</TableCell>
-                          <TableCell>{reasonLabels[ret.reason] || ret.reason}</TableCell>
-                          <TableCell className="text-right font-medium">
-                            AED {ret.return_amount?.toFixed(2) || '0.00'}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={status.color}>
-                              <StatusIcon className="w-3 h-3 mr-1" />
-                              {status.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setViewReturn(ret)}
-                              >
-                                <Eye className="w-4 h-4" />
-                              </Button>
-                              {ret.status === 'pending' && (
-                                <>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => processReturn(ret.id, 'processed')}
-                                    disabled={processingReturn === ret.id}
-                                    className="text-green-600 hover:text-green-700"
-                                  >
-                                    Approve
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => processReturn(ret.id, 'rejected')}
-                                    disabled={processingReturn === ret.id}
-                                    className="text-red-600 hover:text-red-700"
-                                  >
-                                    Reject
-                                  </Button>
-                                </>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Store</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Size</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="w-32">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentReturns.map(ret => {
+                        const status = statusConfig[ret.status] || statusConfig.pending;
+                        const StatusIcon = status.icon;
+                        
+                        return (
+                          <TableRow key={ret.id}>
+                            <TableCell>
+                              {ret.created_date 
+                                ? new Date(ret.created_date).toLocaleDateString()
+                                : '—'
+                              }
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">{ret.store_name}</Badge>
+                            </TableCell>
+                            <TableCell className="font-medium">{ret.style_name}</TableCell>
+                            <TableCell>{ret.size || '—'}</TableCell>
+                            <TableCell className="text-right">{ret.quantity}</TableCell>
+                            <TableCell>{reasonLabels[ret.reason] || ret.reason}</TableCell>
+                            <TableCell className="text-right font-medium">
+                              AED {ret.return_amount?.toFixed(2) || '0.00'}
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={status.color}>
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {status.label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setViewReturn(ret)}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                {ret.status === 'pending' && (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => processReturn(ret.id, 'processed')}
+                                      disabled={processingReturn === ret.id}
+                                      className="text-green-600 hover:text-green-700"
+                                    >
+                                      Approve
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => processReturn(ret.id, 'rejected')}
+                                      disabled={processingReturn === ret.id}
+                                      className="text-red-600 hover:text-red-700"
+                                    >
+                                      Reject
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
 
                   <div className="flex items-center justify-between p-4">
                     <div className="flex items-center gap-2">
@@ -460,6 +461,7 @@ export default function Returns() {
                       </Button>
                     </div>
                   </div>
+                </div>
               )}
             </CardContent>
           </Card>
