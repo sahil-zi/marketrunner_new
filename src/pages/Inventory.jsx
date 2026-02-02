@@ -52,7 +52,7 @@ const processGoogleDriveLink = (url) => {
   if (!url) return url;
   const match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
-    return `https://drive.google.com/uc?id=${match[1]}`;
+    return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w400`;
   }
   return url;
 };
