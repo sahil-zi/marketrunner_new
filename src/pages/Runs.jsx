@@ -14,7 +14,10 @@ import {
   Store,
   Play,
   Eye,
-  Printer
+  Printer,
+  X,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -55,6 +58,9 @@ export default function Runs() {
   const [selectedPickupItems, setSelectedPickupItems] = useState([]);
   const [selectedReturnItems, setSelectedReturnItems] = useState([]);
   const [runItemsCache, setRunItemsCache] = useState({});
+  const [selectedRuns, setSelectedRuns] = useState([]);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -334,6 +340,41 @@ export default function Runs() {
     await printToZebra(zpl);
   }
 
+  // Cancel runs
+  async function cancelRuns() {
+    setIsCancelling(true);
+    try {
+      const { data } = await base44.functions.invoke('cancelRuns', { runIds: selectedRuns });
+      
+      const completed = data.results.filter(r => r.status === 'completed').length;
+      const cancelled = data.results.filter(r => r.status === 'cancelled').length;
+      
+      if (completed > 0 && cancelled > 0) {
+        toast.success(`${completed} run(s) completed with picked items, ${cancelled} fully cancelled`);
+      } else if (completed > 0) {
+        toast.success(`${completed} run(s) completed with picked items`);
+      } else {
+        toast.success(`${cancelled} run(s) cancelled`);
+      }
+      
+      setShowCancelDialog(false);
+      setSelectedRuns([]);
+      loadData();
+    } catch (error) {
+      toast.error('Failed to cancel runs');
+      console.error(error);
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
+  // Toggle run selection
+  function toggleRunSelection(runId) {
+    setSelectedRuns(prev => 
+      prev.includes(runId) ? prev.filter(id => id !== runId) : [...prev, runId]
+    );
+  }
+
   const statusConfig = {
     draft: { icon: Clock, color: 'bg-gray-100 text-gray-700', label: 'Draft' },
     active: { icon: Truck, color: 'bg-amber-100 text-amber-700', label: 'Active' },
@@ -351,14 +392,26 @@ export default function Runs() {
           <h1 className="text-2xl font-bold text-gray-900">Runs</h1>
           <p className="text-gray-500 mt-1">Consolidate orders & returns for pickup runs</p>
         </div>
-        <Button 
-          onClick={() => setShowGenerateDialog(true)}
-          disabled={!hasPendingItems}
-          className="bg-teal-600 hover:bg-teal-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Generate New Run
-        </Button>
+        <div className="flex gap-2">
+          {selectedRuns.length > 0 && (
+            <Button 
+              variant="outline"
+              onClick={() => setShowCancelDialog(true)}
+              className="text-red-600 hover:text-red-700 border-red-200"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Cancel {selectedRuns.length} Run{selectedRuns.length !== 1 ? 's' : ''}
+            </Button>
+          )}
+          <Button 
+            onClick={() => setShowGenerateDialog(true)}
+            disabled={!hasPendingItems}
+            className="bg-teal-600 hover:bg-teal-700"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Generate New Run
+          </Button>
+        </div>
       </div>
 
       {/* Pending Summary */}
@@ -420,6 +473,18 @@ export default function Runs() {
                 <CardContent className="p-6">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => toggleRunSelection(run.id)}
+                        className="shrink-0"
+                      >
+                        {selectedRuns.includes(run.id) ? (
+                          <CheckSquare className="w-5 h-5 text-teal-600" />
+                        ) : (
+                          <Square className="w-5 h-5 text-gray-400" />
+                        )}
+                      </Button>
                       <div className="w-14 h-14 bg-gray-50 rounded-xl flex items-center justify-center">
                         <Truck className="w-7 h-7 text-gray-400" />
                       </div>
@@ -629,6 +694,37 @@ export default function Runs() {
               className="bg-teal-600 hover:bg-teal-700"
             >
               Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Runs Dialog */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel {selectedRuns.length} Run{selectedRuns.length !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogDescription>
+              Runs with picked items will be marked as completed. Unpicked items will revert to pending status.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={cancelRuns}
+              disabled={isCancelling}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isCancelling ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Cancelling...
+                </>
+              ) : (
+                'Confirm'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -198,25 +198,33 @@ export default function Inventory() {
     const newStores = new Set();
     let duplicatesInFile = 0;
     let duplicatesInDb = 0;
+    let newProducts = 0;
 
     rows.forEach((row, idx) => {
       const barcode = row.Barcode?.trim();
       const storeName = row.StoreName?.trim();
+      const isNewProduct = !existingBarcodes.has(barcode);
       
       if (!barcode) {
         errors.push({ row: row._rowNum, message: 'Missing barcode' });
-      } else if (barcodes.has(barcode)) {
+        return;
+      }
+
+      if (barcodes.has(barcode)) {
         duplicatesInFile++;
         warnings.push({ row: row._rowNum, message: `Duplicate barcode in file: ${barcode}` });
       } else {
         barcodes.add(barcode);
         if (existingBarcodes.has(barcode)) {
           duplicatesInDb++;
+        } else {
+          newProducts++;
         }
       }
 
-      if (!row.Style?.trim()) {
-        errors.push({ row: row._rowNum, message: 'Missing style name' });
+      // For new products, require Style
+      if (isNewProduct && !row.Style?.trim()) {
+        errors.push({ row: row._rowNum, message: 'Missing style name (required for new products)' });
       }
 
       if (storeName && !existingStoreNames.has(storeName.toLowerCase())) {
@@ -245,7 +253,7 @@ export default function Inventory() {
       hasDuplicates: duplicatesInDb > 0,
       stats: {
         'Total Rows': rows.length,
-        'New Products': rows.length - duplicatesInDb,
+        'New Products': newProducts,
         'Updates': duplicatesInDb,
         'New Stores': newStores.size,
       },
@@ -275,48 +283,59 @@ export default function Inventory() {
     // Prepare products for import
     const productsToCreate = [];
     const productsToUpdate = [];
-    const existingBarcodes = new Map(products.map(p => [p.barcode, p.id]));
+    const existingBarcodes = new Map(products.map(p => [p.barcode, p]));
 
     rows.forEach(row => {
       const barcode = row.Barcode?.trim();
       if (!barcode) return;
 
-      const storeId = existingStoreNames.get(row.StoreName?.trim()?.toLowerCase()) || null;
+      const existingProduct = existingBarcodes.get(barcode);
+      const storeId = row.StoreName?.trim() 
+        ? existingStoreNames.get(row.StoreName.trim().toLowerCase()) 
+        : undefined;
       
-      const productData = {
-        barcode,
-        style_name: row.Style?.trim(),
-        size: row.Size?.trim(),
-        color: row.Color?.trim(),
-        image_url: row.ImageURL?.trim(),
-        cost_price: row.Cost ? parseFloat(row.Cost) : null,
-        rrp: row.RRP ? parseFloat(row.RRP) : null,
-        family: row.Family?.trim(),
-        category: row.Category?.trim(),
-        sub_category: row.SubCat?.trim(),
-        occasion: row.Occasion?.trim(),
-        store_id: storeId,
-      };
+      // Build product data - only include fields that are present in CSV
+      const productData = { barcode };
+      
+      if (row.Style !== undefined) productData.style_name = row.Style?.trim() || '';
+      if (row.Size !== undefined) productData.size = row.Size?.trim() || '';
+      if (row.Color !== undefined) productData.color = row.Color?.trim() || '';
+      if (row.ImageURL !== undefined) productData.image_url = row.ImageURL?.trim() || '';
+      if (row.Cost !== undefined) productData.cost_price = row.Cost ? parseFloat(row.Cost) : null;
+      if (row.RRP !== undefined) productData.rrp = row.RRP ? parseFloat(row.RRP) : null;
+      if (row.Family !== undefined) productData.family = row.Family?.trim() || '';
+      if (row.Category !== undefined) productData.category = row.Category?.trim() || '';
+      if (row.SubCat !== undefined) productData.sub_category = row.SubCat?.trim() || '';
+      if (row.Occasion !== undefined) productData.occasion = row.Occasion?.trim() || '';
+      if (storeId !== undefined) productData.store_id = storeId || null;
 
-      if (existingBarcodes.has(barcode)) {
+      if (existingProduct) {
         if (mode === 'overwrite') {
-          productsToUpdate.push({ id: existingBarcodes.get(barcode), ...productData });
+          productsToUpdate.push({ id: existingProduct.id, ...productData });
         }
       } else {
         productsToCreate.push(productData);
       }
     });
 
-    // Create new products
+    // Create new products in batches
     if (productsToCreate.length > 0) {
-      await base44.entities.ProductCatalog.bulkCreate(productsToCreate);
+      const batchSize = 50;
+      for (let i = 0; i < productsToCreate.length; i += batchSize) {
+        const batch = productsToCreate.slice(i, i + batchSize);
+        await base44.entities.ProductCatalog.bulkCreate(batch);
+      }
     }
 
-    // Update existing products
+    // Update existing products in batches
     if (productsToUpdate.length > 0) {
-      await base44.functions.invoke('bulkUpdateProducts', { 
-        products: productsToUpdate 
-      });
+      const batchSize = 50;
+      for (let i = 0; i < productsToUpdate.length; i += batchSize) {
+        const batch = productsToUpdate.slice(i, i + batchSize);
+        await base44.functions.invoke('bulkUpdateProducts', { 
+          products: batch 
+        });
+      }
     }
 
     toast.success(`Imported ${productsToCreate.length} new products, updated ${productsToUpdate.length}`);

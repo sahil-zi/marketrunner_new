@@ -15,12 +15,18 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Invalid products data' }, { status: 400 });
     }
 
-    // Update products using service role for better performance
-    const updatePromises = products.map(product => 
-      base44.asServiceRole.entities.ProductCatalog.update(product.id, product)
-    );
-
-    await Promise.all(updatePromises);
+    // Update products in batches to avoid rate limits
+    const batchSize = 10;
+    let updated = 0;
+    
+    for (let i = 0; i < products.length; i += batchSize) {
+      const batch = products.slice(i, i + batchSize);
+      const updatePromises = batch.map(product => 
+        base44.asServiceRole.entities.ProductCatalog.update(product.id, product)
+      );
+      await Promise.all(updatePromises);
+      updated += batch.length;
+    }
 
     return Response.json({ 
       success: true, 
