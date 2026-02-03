@@ -363,9 +363,9 @@ export default function Inventory() {
   // Bulk delete products
   async function bulkDeleteProducts() {
     try {
-      for (const id of selectedProducts) {
-        await base44.entities.ProductCatalog.delete(id);
-      }
+      await base44.functions.invoke('bulkDeleteProducts', { 
+        productIds: selectedProducts 
+      });
       toast.success(`Deleted ${selectedProducts.length} products`);
       setSelectedProducts([]);
       setDeleteConfirm(null);
