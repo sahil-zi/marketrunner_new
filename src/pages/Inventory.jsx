@@ -171,12 +171,22 @@ export default function Inventory() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedProducts.length === filteredProducts.length) {
-      setSelectedProducts([]);
+    const currentPageIds = currentProducts.map(p => p.id);
+    const allCurrentSelected = currentPageIds.every(id => selectedProducts.includes(id));
+
+    if (allCurrentSelected) {
+      setSelectedProducts(prev => prev.filter(id => !currentPageIds.includes(id)));
     } else {
-      setSelectedProducts(filteredProducts.map(p => p.id));
+      setSelectedProducts(prev => [...new Set([...prev, ...currentPageIds])]);
     }
   };
+
+  const selectAllFiltered = () => {
+    setSelectedProducts(filteredProducts.map(p => p.id));
+  };
+
+  const isAllCurrentPageSelected = currentProducts.length > 0 && 
+    currentProducts.every(p => selectedProducts.includes(p.id));
 
   // Validate products CSV
   async function validateProducts(rows, headers) {
@@ -506,6 +516,21 @@ export default function Inventory() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
+                  {selectedProducts.length > 0 && selectedProducts.length < filteredProducts.length && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+                      <p className="text-sm text-blue-800">
+                        {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''} selected on this page
+                      </p>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={selectAllFiltered}
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        Select all {filteredProducts.length} products
+                      </Button>
+                    </div>
+                  )}
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -515,7 +540,7 @@ export default function Inventory() {
                             size="icon"
                             onClick={toggleSelectAll}
                           >
-                            {selectedProducts.length === filteredProducts.length ? (
+                            {isAllCurrentPageSelected ? (
                               <CheckSquare className="w-4 h-4 text-teal-600" />
                             ) : (
                               <Square className="w-4 h-4 text-gray-400" />
