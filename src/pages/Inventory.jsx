@@ -50,9 +50,24 @@ import LabelPrinter from '@/components/admin/LabelPrinter';
 
 const processGoogleDriveLink = (url) => {
   if (!url) return url;
-  const match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-  if (match && match[1]) {
-    return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+
+  let fileId = null;
+
+  // Extract ID from 'file/d/FILE_ID/view' format
+  const fileDMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileDMatch && fileDMatch[1]) {
+    fileId = fileDMatch[1];
+  } else {
+    // Extract ID from 'uc?export=view&id=FILE_ID' or 'open?id=FILE_ID' format
+    const ucIdMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (ucIdMatch && ucIdMatch[1]) {
+      fileId = ucIdMatch[1];
+    }
+  }
+
+  if (fileId) {
+    // Use Google Drive thumbnail API for reliable image rendering
+    return `https://drive.google.com/thumbnail?id=${fileId}&sz=w200`;
   }
   return url;
 };
