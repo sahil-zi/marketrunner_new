@@ -350,6 +350,21 @@ export default function Inventory() {
     }
   }
 
+  // Bulk delete products
+  async function bulkDeleteProducts() {
+    try {
+      for (const id of selectedProducts) {
+        await base44.entities.ProductCatalog.delete(id);
+      }
+      toast.success(`Deleted ${selectedProducts.length} products`);
+      setSelectedProducts([]);
+      setDeleteConfirm(null);
+      loadData();
+    } catch (error) {
+      toast.error('Failed to delete products');
+    }
+  }
+
   const getStoreName = (storeId) => {
     const store = stores.find(s => s.id === storeId);
     return store?.name || '—';
@@ -397,11 +412,21 @@ export default function Inventory() {
         </div>
         <div className="flex gap-2">
           {selectedProducts.length > 0 && (
-            <LabelPrinter 
-              items={selectedProductsData} 
-              buttonText={`Print ${selectedProducts.length} Labels`}
-              variant="outline"
-            />
+            <>
+              <LabelPrinter 
+                items={selectedProductsData} 
+                buttonText={`Print ${selectedProducts.length} Labels`}
+                variant="outline"
+              />
+              <Button 
+                variant="outline"
+                onClick={() => setDeleteConfirm({ bulk: true, count: selectedProducts.length })}
+                className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete {selectedProducts.length}
+              </Button>
+            </>
           )}
           <Button 
             onClick={() => { setEditingProduct({}); setIsDialogOpen(true); }}
@@ -656,10 +681,14 @@ export default function Inventory() {
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Product</DialogTitle>
+            <DialogTitle>{deleteConfirm?.bulk ? 'Delete Multiple Products' : 'Delete Product'}</DialogTitle>
           </DialogHeader>
           <p className="text-gray-600">
-            Are you sure you want to delete <strong>{deleteConfirm?.style_name}</strong> ({deleteConfirm?.barcode})?
+            {deleteConfirm?.bulk ? (
+              <>Are you sure you want to delete <strong>{deleteConfirm.count} selected products</strong>? This action cannot be undone.</>
+            ) : (
+              <>Are you sure you want to delete <strong>{deleteConfirm?.style_name}</strong> ({deleteConfirm?.barcode})?</>
+            )}
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
@@ -667,7 +696,7 @@ export default function Inventory() {
             </Button>
             <Button 
               variant="destructive" 
-              onClick={() => deleteProduct(deleteConfirm.id)}
+              onClick={() => deleteConfirm?.bulk ? bulkDeleteProducts() : deleteProduct(deleteConfirm.id)}
             >
               Delete
             </Button>
