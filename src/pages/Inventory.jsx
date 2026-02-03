@@ -313,8 +313,10 @@ export default function Inventory() {
     }
 
     // Update existing products
-    for (const product of productsToUpdate) {
-      await base44.entities.ProductCatalog.update(product.id, product);
+    if (productsToUpdate.length > 0) {
+      await base44.functions.invoke('bulkUpdateProducts', { 
+        products: productsToUpdate 
+      });
     }
 
     toast.success(`Imported ${productsToCreate.length} new products, updated ${productsToUpdate.length}`);
