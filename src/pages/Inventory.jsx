@@ -516,6 +516,8 @@ export default function Inventory() {
                                 src={processGoogleDriveLink(product.image_url)} 
                                 alt={product.style_name}
                                 className="w-10 h-10 object-cover rounded-lg"
+                                referrerPolicy="no-referrer"
+                                crossOrigin="anonymous"
                                 onError={(e) => { e.target.style.display = 'none'; }}
                               />
                             ) : (
