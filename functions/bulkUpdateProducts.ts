@@ -21,9 +21,10 @@ Deno.serve(async (req) => {
     
     for (let i = 0; i < products.length; i += batchSize) {
       const batch = products.slice(i, i + batchSize);
-      const updatePromises = batch.map(product => 
-        base44.asServiceRole.entities.ProductCatalog.update(product.id, product)
-      );
+      const updatePromises = batch.map(product => {
+        const { id, ...productData } = product;
+        return base44.asServiceRole.entities.ProductCatalog.update(id, productData);
+      });
       await Promise.all(updatePromises);
       updated += batch.length;
     }
