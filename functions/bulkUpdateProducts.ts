@@ -15,8 +15,8 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Invalid products data' }, { status: 400 });
     }
 
-    // Update products in batches to avoid rate limits
-    const batchSize = 10;
+    // Update products in smaller batches to avoid rate limits
+    const batchSize = 3;
     let updated = 0;
     
     for (let i = 0; i < products.length; i += batchSize) {
@@ -27,6 +27,11 @@ Deno.serve(async (req) => {
       });
       await Promise.all(updatePromises);
       updated += batch.length;
+      
+      // Add delay between batches to avoid rate limiting
+      if (i + batchSize < products.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
 
     return Response.json({ 
