@@ -55,48 +55,55 @@ Deno.serve(async (req) => {
     let y = 55;
 
     // Iterate through each store
-    for (const [storeId, group] of Object.entries(storeGroups)) {
-      // Check if we need a new page
-      if (y > 250) {
-        doc.addPage();
-        y = 20;
-      }
-
+    const storeEntries = Object.entries(storeGroups);
+    for (let storeIndex = 0; storeIndex < storeEntries.length; storeIndex++) {
+      const [storeId, group] = storeEntries[storeIndex];
+      
       // Store header
       doc.setFontSize(14);
       doc.setFont(undefined, 'bold');
       doc.text(group.storeName, 20, y);
       doc.setFont(undefined, 'normal');
-      y += 8;
+      y += 10;
 
-      // Table header
-      doc.setFontSize(9);
-      doc.text('Barcode', 20, y);
-      doc.text('Style', 60, y);
-      doc.text('Size', 100, y);
-      doc.text('Target', 130, y);
-      doc.text('Picked', 155, y);
-      doc.text('Type', 175, y);
-      y += 6;
-
-      // Items
-      doc.setFontSize(8);
+      // Items with images
       for (const item of group.items) {
-        if (y > 280) {
+        // Check if we need a new page
+        if (y > 240) {
           doc.addPage();
           y = 20;
         }
 
-        doc.text(item.barcode || '', 20, y);
-        doc.text((item.style_name || '').substring(0, 20), 60, y);
-        doc.text(item.size || '', 100, y);
-        doc.text(String(item.target_qty || 0), 130, y);
-        doc.text(String(item.picked_qty || 0), 155, y);
-        doc.text(item.type || 'pickup', 175, y);
-        y += 5;
+        // Add product image if available
+        if (item.image_url) {
+          try {
+            doc.addImage(item.image_url, 'JPEG', 20, y, 30, 30);
+          } catch (e) {
+            // Skip image if loading fails
+          }
+        }
+
+        // Item details next to image
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.text((item.style_name || '').substring(0, 35), 55, y + 5);
+        doc.setFont(undefined, 'normal');
+        
+        doc.setFontSize(8);
+        doc.text(`Barcode: ${item.barcode || ''}`, 55, y + 12);
+        doc.text(`Size: ${item.size || ''}`, 55, y + 17);
+        doc.text(`Color: ${item.color || ''}`, 55, y + 22);
+        doc.text(`Quantity: ${item.target_qty || 0}`, 55, y + 27);
+        doc.text(`Type: ${item.type || 'pickup'}`, 120, y + 27);
+
+        y += 35; // Space for next item
       }
 
-      y += 10; // Space between stores
+      // Add page break after each store (except the last one)
+      if (storeIndex < storeEntries.length - 1) {
+        doc.addPage();
+        y = 20;
+      }
     }
 
     const pdfBytes = doc.output('arraybuffer');
