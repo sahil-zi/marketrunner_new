@@ -52,6 +52,24 @@ Deno.serve(async (req) => {
     doc.text(`Status: ${runData.status}`, 20, 36);
     doc.text(`Runner: ${runData.runner_name || 'Not Assigned'}`, 20, 42);
     
+    // Helper function to load image as base64
+    async function loadImageAsBase64(url) {
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+        return `data:${blob.type};base64,${base64}`;
+      } catch (e) {
+        return null;
+      }
+    }
+
     let y = 55;
 
     // Iterate through each store
@@ -59,17 +77,23 @@ Deno.serve(async (req) => {
     for (let storeIndex = 0; storeIndex < storeEntries.length; storeIndex++) {
       const [storeId, group] = storeEntries[storeIndex];
       
+      // Start new page for each store (except first)
+      if (storeIndex > 0) {
+        doc.addPage();
+        y = 20;
+      }
+      
       // Store header
-      doc.setFontSize(14);
+      doc.setFontSize(16);
       doc.setFont(undefined, 'bold');
       doc.text(group.storeName, 20, y);
       doc.setFont(undefined, 'normal');
-      y += 10;
+      y += 12;
 
       // Items with images
       for (const item of group.items) {
         // Check if we need a new page
-        if (y > 240) {
+        if (y > 230) {
           doc.addPage();
           y = 20;
         }
@@ -77,32 +101,29 @@ Deno.serve(async (req) => {
         // Add product image if available
         if (item.image_url) {
           try {
-            doc.addImage(item.image_url, 'JPEG', 20, y, 30, 30);
+            const imageData = await loadImageAsBase64(item.image_url);
+            if (imageData) {
+              doc.addImage(imageData, 'JPEG', 20, y, 35, 35);
+            }
           } catch (e) {
             // Skip image if loading fails
           }
         }
 
         // Item details next to image
-        doc.setFontSize(10);
+        doc.setFontSize(11);
         doc.setFont(undefined, 'bold');
-        doc.text((item.style_name || '').substring(0, 35), 55, y + 5);
+        doc.text((item.style_name || '').substring(0, 35), 60, y + 6);
         doc.setFont(undefined, 'normal');
         
-        doc.setFontSize(8);
-        doc.text(`Barcode: ${item.barcode || ''}`, 55, y + 12);
-        doc.text(`Size: ${item.size || ''}`, 55, y + 17);
-        doc.text(`Color: ${item.color || ''}`, 55, y + 22);
-        doc.text(`Quantity: ${item.target_qty || 0}`, 55, y + 27);
-        doc.text(`Type: ${item.type || 'pickup'}`, 120, y + 27);
+        doc.setFontSize(9);
+        doc.text(`Barcode: ${item.barcode || ''}`, 60, y + 14);
+        doc.text(`Size: ${item.size || 'N/A'}`, 60, y + 20);
+        doc.text(`Color: ${item.color || 'N/A'}`, 60, y + 26);
+        doc.text(`Quantity: ${item.target_qty || 0}`, 60, y + 32);
+        doc.text(`Type: ${(item.type || 'pickup').toUpperCase()}`, 130, y + 32);
 
-        y += 35; // Space for next item
-      }
-
-      // Add page break after each store (except the last one)
-      if (storeIndex < storeEntries.length - 1) {
-        doc.addPage();
-        y = 20;
+        y += 42; // Space for next item
       }
     }
 
