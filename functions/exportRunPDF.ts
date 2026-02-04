@@ -16,114 +16,129 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Run ID is required' }, { status: 400 });
     }
 
-    // Fetch run data
     const run = await base44.entities.Run.filter({ id: runId });
     if (!run || run.length === 0) {
       return Response.json({ error: 'Run not found' }, { status: 404 });
     }
     const runData = run[0];
 
-    // Fetch run items
     const runItems = await base44.entities.RunItem.filter({ run_id: runId });
+    
+    const allStores = await base44.entities.Store.list();
+    const storeMap = new Map(allStores.map(s => [s.id, s.name]));
 
-    // Group items by store
-    const storeGroups = {};
-    for (const item of runItems) {
-      const storeId = item.store_id || 'unknown';
-      const storeName = item.store_name || 'Unknown Store';
-      if (!storeGroups[storeId]) {
-        storeGroups[storeId] = {
-          storeName,
-          items: []
-        };
-      }
-      storeGroups[storeId].items.push(item);
-    }
-
-    // Create PDF
-    const doc = new jsPDF();
-    
-    // Title
-    doc.setFontSize(18);
-    doc.text(`Run #${runData.run_number} - Store-wise Breakdown`, 20, 20);
-    
-    doc.setFontSize(10);
-    doc.text(`Date: ${runData.date}`, 20, 30);
-    doc.text(`Status: ${runData.status}`, 20, 36);
-    doc.text(`Runner: ${runData.runner_name || 'Not Assigned'}`, 20, 42);
-    
-    // Helper function to load image as base64
     async function loadImageAsBase64(url) {
       try {
         const response = await fetch(url);
-        const blob = await response.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
+        if (!response.ok) {
+          return null;
         }
-        const base64 = btoa(binary);
-        return `data:${blob.type};base64,${base64}`;
+        const arrayBuffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        
+        let binaryString = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binaryString += String.fromCharCode(bytes[i]);
+        }
+        
+        const base64 = btoa(binaryString);
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
+        return `data:${contentType};base64,${base64}`;
       } catch (e) {
         return null;
       }
     }
 
+    const storeGroups = {};
+    for (const item of runItems) {
+      const storeId = item.store_id || 'unknown';
+      const storeName = storeMap.get(storeId) || item.store_name || `Store ${storeId}`;
+
+      if (!storeGroups[storeId]) {
+        storeGroups[storeId] = {
+          storeName: storeName,
+          styles: {},
+        };
+      }
+      const styleKey = item.style_name || item.barcode; 
+      if (!storeGroups[storeId].styles[styleKey]) {
+        storeGroups[storeId].styles[styleKey] = {
+          image_url: item.image_url, 
+          sizes: [],
+        };
+      }
+      storeGroups[storeId].styles[styleKey].sizes.push({
+        size: item.size || 'N/A',
+        quantity: item.target_qty || 0,
+      });
+    }
+
+    const doc = new jsPDF();
+    
+    doc.setFontSize(18);
+    doc.text(`Run #${runData.run_number || 'N/A'} - Store-wise Breakdown`, 20, 20);
+    
+    doc.setFontSize(10);
+    doc.text(`Date: ${runData.date || 'N/A'}`, 20, 30);
+    doc.text(`Status: ${runData.status || 'N/A'}`, 20, 36);
+    doc.text(`Runner: ${runData.runner_name || 'Not Assigned'}`, 20, 42);
+
     let y = 55;
 
-    // Iterate through each store
     const storeEntries = Object.entries(storeGroups);
     for (let storeIndex = 0; storeIndex < storeEntries.length; storeIndex++) {
       const [storeId, group] = storeEntries[storeIndex];
       
-      // Start new page for each store (except first)
       if (storeIndex > 0) {
         doc.addPage();
-        y = 20;
+        y = 20; 
       }
       
-      // Store header
       doc.setFontSize(16);
       doc.setFont(undefined, 'bold');
       doc.text(group.storeName, 20, y);
       doc.setFont(undefined, 'normal');
       y += 12;
 
-      // Items with images
-      for (const item of group.items) {
-        // Check if we need a new page
-        if (y > 230) {
+      const styleEntries = Object.entries(group.styles);
+      for (const [styleName, styleData] of styleEntries) {
+        const tableHeight = (styleData.sizes.length * 6) + 12; 
+        const estimatedBlockHeight = 60 + tableHeight; 
+        
+        if (y + estimatedBlockHeight > 270) { 
           doc.addPage();
           y = 20;
         }
 
-        // Add product image if available
-        if (item.image_url) {
-          try {
-            const imageData = await loadImageAsBase64(item.image_url);
-            if (imageData) {
-              doc.addImage(imageData, 'JPEG', 20, y, 35, 35);
-            }
-          } catch (e) {
-            // Skip image if loading fails
+        if (styleData.image_url) {
+          const imageData = await loadImageAsBase64(styleData.image_url);
+          if (imageData) {
+            doc.addImage(imageData, 'JPEG', 20, y, 50, 50); 
           }
         }
 
-        // Item details next to image
-        doc.setFontSize(11);
+        doc.setFontSize(14);
         doc.setFont(undefined, 'bold');
-        doc.text((item.style_name || '').substring(0, 35), 60, y + 6);
+        doc.text(`Style: ${styleName}`, 80, y + 10);
         doc.setFont(undefined, 'normal');
+        doc.setFontSize(10);
+        doc.text(`Shop No: ${group.storeName}`, 80, y + 20);
         
-        doc.setFontSize(9);
-        doc.text(`Barcode: ${item.barcode || ''}`, 60, y + 14);
-        doc.text(`Size: ${item.size || 'N/A'}`, 60, y + 20);
-        doc.text(`Color: ${item.color || 'N/A'}`, 60, y + 26);
-        doc.text(`Quantity: ${item.target_qty || 0}`, 60, y + 32);
-        doc.text(`Type: ${(item.type || 'pickup').toUpperCase()}`, 130, y + 32);
+        let currentY = y + 35; 
+        
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.text('Size', 80, currentY);
+        doc.text('Quantity', 120, currentY);
+        doc.setFont(undefined, 'normal');
+        currentY += 6; 
 
-        y += 42; // Space for next item
+        for (const sizeEntry of styleData.sizes) {
+          doc.text(sizeEntry.size, 80, currentY);
+          doc.text(String(sizeEntry.quantity), 120, currentY); 
+          currentY += 6; 
+        }
+        y = currentY + 10; 
       }
     }
 
