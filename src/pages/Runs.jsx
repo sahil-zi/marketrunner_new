@@ -17,7 +17,8 @@ import {
   Printer,
   X,
   CheckSquare,
-  Square
+  Square,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -340,6 +341,30 @@ export default function Runs() {
     await printToZebra(zpl);
   }
 
+  // Export run to PDF
+  async function exportRunPDF(runId) {
+    try {
+      toast.loading('Generating PDF...');
+      const { data } = await base44.functions.invoke('exportRunPDF', { runId });
+      const blob = new Blob([data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const run = runs.find(r => r.id === runId);
+      a.download = `run-${run?.run_number || runId}-stores.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      toast.dismiss();
+      toast.success('PDF downloaded');
+    } catch (error) {
+      toast.dismiss();
+      toast.error('Failed to export PDF');
+      console.error(error);
+    }
+  }
+
   // Cancel runs
   async function cancelRuns() {
     setIsCancelling(true);
@@ -380,6 +405,7 @@ export default function Runs() {
     active: { icon: Truck, color: 'bg-amber-100 text-amber-700', label: 'Active' },
     completed: { icon: CheckCircle2, color: 'bg-green-100 text-green-700', label: 'Completed' },
     dropped_off: { icon: CheckCircle2, color: 'bg-teal-100 text-teal-700', label: 'Dropped Off' },
+    cancelled: { icon: X, color: 'bg-red-100 text-red-700', label: 'Cancelled' },
   };
 
   const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
@@ -519,6 +545,14 @@ export default function Runs() {
                     </div>
                     
                     <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => exportRunPDF(run.id)}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Export PDF
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
