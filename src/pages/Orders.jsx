@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
-import { 
-  ShoppingCart, 
-  Search, 
-  Loader2, 
+import { motion } from 'framer-motion';
+import {
+  ShoppingCart,
+  Search,
+  Loader2,
   Package,
   Calendar,
   AlertCircle,
   CheckCircle2,
   Download,
   MoreHorizontal,
-  XCircle
+  XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,102 +34,146 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { toast } from 'sonner';
-import CSVUploader from '@/components/admin/CSVUploader';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
+
+import PageHeader from '@/components/admin/PageHeader';
+import StatusBadge from '@/components/admin/StatusBadge';
+import EmptyState from '@/components/admin/EmptyState';
+import PaginationBar from '@/components/admin/PaginationBar';
+import CSVUploader from '@/components/admin/CSVUploader';
+
+import { useOrders, useOrderItems, useUpdateOrderItem } from '@/hooks/use-orders';
+import { useProducts } from '@/hooks/use-products';
+import { usePagination } from '@/hooks/use-pagination';
+
+/* ------------------------------------------------------------------ */
+/*  Framer Motion variants                                            */
+/* ------------------------------------------------------------------ */
+
+const tableContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.03 },
+  },
+};
+
+const tableRowVariants = {
+  hidden: { opacity: 0, y: 6 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+};
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
+
+function deriveOrderStatus(items) {
+  if (items.length === 0) return 'pending';
+  if (items.every((i) => i.status === 'shipped')) return 'shipped';
+  if (items.every((i) => i.status === 'picked')) return 'picked';
+  if (items.every((i) => i.status === 'cancelled')) return 'cancelled';
+  if (items.some((i) => i.status === 'pending')) return 'pending';
+  return 'assigned_to_run';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                         */
+/* ------------------------------------------------------------------ */
 
 export default function Orders() {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [orders, setOrders] = useState([]);
-  const [orderItems, setOrderItems] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+
+  /* ---- React Query data ----------------------------------------- */
+  const { data: orders = [], isLoading: ordersLoading } = useOrders('-created_date');
+  const { data: orderItems = [], isLoading: itemsLoading } = useOrderItems('-created_date');
+  const { data: products = [], isLoading: productsLoading } = useProducts();
+
+  const updateOrderItem = useUpdateOrderItem();
+
+  const isLoading = ordersLoading || itemsLoading || productsLoading;
+
+  /* ---- UI state ------------------------------------------------- */
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPlatform, setFilterPlatform] = useState('all');
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  /* ---- Derived data --------------------------------------------- */
+  const platforms = useMemo(
+    () => [...new Set(orders.map((o) => o.platform_name).filter(Boolean))],
+    [orders]
+  );
 
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const [ordersData, orderItemsData, productsData] = await Promise.all([
-        base44.entities.Order.list('-created_date'),
-        base44.entities.OrderItem.list('-created_date'),
-        base44.entities.ProductCatalog.list(),
-      ]);
-      setOrders(ordersData);
-      setOrderItems(orderItemsData);
-      setProducts(productsData);
-    } catch (error) {
-      toast.error('Failed to load orders');
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const ordersWithItems = useMemo(
+    () =>
+      orders.map((order) => {
+        const items = orderItems.filter((item) => item.order_id === order.id);
+        return {
+          ...order,
+          items,
+          totalQty: items.reduce((sum, item) => sum + (item.quantity || 0), 0),
+        };
+      }),
+    [orders, orderItems]
+  );
 
-  // Get unique platforms
-  const platforms = [...new Set(orders.map(o => o.platform_name).filter(Boolean))];
-
-  // Build orders with items
-  const ordersWithItems = orders.map(order => {
-    const items = orderItems.filter(item => item.order_id === order.id);
-    return {
-      ...order,
-      items,
-      totalQty: items.reduce((sum, item) => sum + (item.quantity || 0), 0),
-    };
-  });
-
-  // Filter orders
-  const filteredOrders = React.useMemo(() => {
-    const filtered = ordersWithItems.filter(order => {
-      const matchesSearch = 
+  const filteredOrders = useMemo(() => {
+    return ordersWithItems.filter((order) => {
+      const matchesSearch =
         order.platform_order_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.platform_name?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesPlatform = filterPlatform === 'all' || order.platform_name === filterPlatform;
-      
+
+      const matchesPlatform =
+        filterPlatform === 'all' || order.platform_name === filterPlatform;
+
       let matchesStatus = true;
       if (filterStatus !== 'all') {
-        const allItemsStatus = order.items.every(item => item.status === filterStatus);
-        matchesStatus = filterStatus === 'pending' 
-          ? order.items.some(item => item.status === 'pending')
-          : allItemsStatus;
+        const allItemsStatus = order.items.every((item) => item.status === filterStatus);
+        matchesStatus =
+          filterStatus === 'pending'
+            ? order.items.some((item) => item.status === 'pending')
+            : allItemsStatus;
       }
-      
+
       return matchesSearch && matchesPlatform && matchesStatus;
     });
-    return filtered;
   }, [ordersWithItems, searchQuery, filterPlatform, filterStatus]);
 
-  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
-  const currentOrders = React.useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return filteredOrders.slice(startIndex, endIndex);
-  }, [filteredOrders, currentPage, itemsPerPage]);
+  /* ---- Pagination ----------------------------------------------- */
+  const {
+    currentPage,
+    totalPages,
+    paginatedItems: currentOrders,
+    totalItems,
+    itemsPerPage,
+    setPerPage,
+    goToPage,
+  } = usePagination(filteredOrders);
 
-  // Validate orders CSV
-  async function validateOrders(rows, headers) {
+  /* ---- Product lookup ------------------------------------------- */
+  const getProductName = (barcode) => {
+    const product = products.find((p) => p.barcode === barcode);
+    return product ? `${product.style_name} - ${product.size || ''}` : barcode;
+  };
+
+  /* ---- CSV validation ------------------------------------------- */
+  async function validateOrders(rows) {
     const errors = [];
     const warnings = [];
-    const existingBarcodes = new Set(products.map(p => p.barcode));
+    const existingBarcodes = new Set(products.map((p) => p.barcode));
     const existingOrderKeys = new Set(
-      orders.map(o => `${o.platform_name}|${o.platform_order_id}`)
+      orders.map((o) => `${o.platform_name}|${o.platform_order_id}`)
     );
     const newOrderKeys = new Set();
     let duplicatesFound = 0;
-    let missingBarcodes = [];
+    const missingBarcodes = [];
 
-    rows.forEach((row, idx) => {
+    rows.forEach((row) => {
       const platform = row.Platform?.trim();
       const orderId = row.OrderID?.trim();
       const barcode = row.Barcode?.trim();
@@ -154,17 +200,22 @@ export default function Orders() {
 
       if (existingOrderKeys.has(orderKey)) {
         duplicatesFound++;
-        warnings.push({ row: row._rowNum, message: `Duplicate order: ${platform} ${orderId}` });
+        warnings.push({
+          row: row._rowNum,
+          message: `Duplicate order: ${platform} ${orderId}`,
+        });
       } else {
         newOrderKeys.add(orderKey);
       }
     });
 
     if (missingBarcodes.length > 0) {
-      const uniqueMissing = [...new Set(missingBarcodes.map(m => m.barcode))];
-      errors.push({ 
-        row: 0, 
-        message: `${uniqueMissing.length} barcodes not found in catalog: ${uniqueMissing.slice(0, 5).join(', ')}${uniqueMissing.length > 5 ? '...' : ''}` 
+      const uniqueMissing = [...new Set(missingBarcodes.map((m) => m.barcode))];
+      errors.push({
+        row: 0,
+        message: `${uniqueMissing.length} barcodes not found in catalog: ${uniqueMissing
+          .slice(0, 5)
+          .join(', ')}${uniqueMissing.length > 5 ? '...' : ''}`,
       });
     }
 
@@ -176,24 +227,24 @@ export default function Orders() {
       stats: {
         'Total Rows': rows.length,
         'New Orders': newOrderKeys.size,
-        'Duplicates': duplicatesFound,
+        Duplicates: duplicatesFound,
       },
     };
   }
 
-  // Import orders from CSV
+  /* ---- CSV import ----------------------------------------------- */
   async function importOrders(rows, mode) {
     const existingOrderKeys = new Map(
-      orders.map(o => [`${o.platform_name}|${o.platform_order_id}`, o.id])
+      orders.map((o) => [`${o.platform_name}|${o.platform_order_id}`, o.id])
     );
 
     // Group rows by order
     const orderGroups = {};
-    rows.forEach(row => {
+    rows.forEach((row) => {
       const platform = row.Platform?.trim();
       const orderId = row.OrderID?.trim();
       const orderKey = `${platform}|${orderId}`;
-      
+
       if (!orderGroups[orderKey]) {
         orderGroups[orderKey] = {
           platform,
@@ -202,7 +253,7 @@ export default function Orders() {
           items: [],
         };
       }
-      
+
       orderGroups[orderKey].items.push({
         barcode: row.Barcode?.trim(),
         quantity: parseInt(row.Quantity) || 1,
@@ -218,7 +269,7 @@ export default function Orders() {
       }
 
       const orderData = orderGroups[orderKey];
-      
+
       // Create or get order
       let orderId;
       if (existingOrderKeys.has(orderKey)) {
@@ -227,14 +278,16 @@ export default function Orders() {
         const newOrder = await base44.entities.Order.create({
           platform_name: orderData.platform,
           platform_order_id: orderData.orderId,
-          order_timestamp: orderData.orderDate ? new Date(orderData.orderDate).toISOString() : new Date().toISOString(),
+          order_timestamp: orderData.orderDate
+            ? new Date(orderData.orderDate).toISOString()
+            : new Date().toISOString(),
         });
         orderId = newOrder.id;
         ordersCreated++;
       }
 
       // Create order items
-      const itemsToCreate = orderData.items.map(item => ({
+      const itemsToCreate = orderData.items.map((item) => ({
         order_id: orderId,
         barcode: item.barcode,
         quantity: item.quantity,
@@ -246,41 +299,36 @@ export default function Orders() {
     }
 
     toast.success(`Imported ${ordersCreated} orders with ${itemsCreated} items`);
-    loadData();
+    queryClient.invalidateQueries({ queryKey: ['orders'] });
+    queryClient.invalidateQueries({ queryKey: ['orderItems'] });
   }
 
-  const getStatusBadge = (status) => {
-    const colors = {
-      pending: 'bg-amber-100 text-amber-700',
-      assigned_to_run: 'bg-blue-100 text-blue-700',
-      picked: 'bg-green-100 text-green-700',
-      shipped: 'bg-purple-100 text-purple-700',
-      cancelled: 'bg-gray-100 text-gray-700',
-    };
-    return <Badge className={colors[status] || colors.pending}>{status}</Badge>;
-  };
-
-  const getProductName = (barcode) => {
-    const product = products.find(p => p.barcode === barcode);
-    return product ? `${product.style_name} - ${product.size || ''}` : barcode;
-  };
-
-  // Export orders to CSV
+  /* ---- Export CSV ------------------------------------------------ */
   function exportOrders() {
-    const headers = ['Platform', 'OrderID', 'OrderDate', 'Barcode', 'ProductName', 'Quantity', 'Status'];
-    const rows = ordersWithItems.flatMap(order => 
-      order.items.map(item => [
+    const headers = [
+      'Platform',
+      'OrderID',
+      'OrderDate',
+      'Barcode',
+      'ProductName',
+      'Quantity',
+      'Status',
+    ];
+    const rows = ordersWithItems.flatMap((order) =>
+      order.items.map((item) => [
         order.platform_name,
         order.platform_order_id,
-        order.order_timestamp ? new Date(order.order_timestamp).toISOString().split('T')[0] : '',
+        order.order_timestamp
+          ? new Date(order.order_timestamp).toISOString().split('T')[0]
+          : '',
         item.barcode,
         getProductName(item.barcode),
         item.quantity,
         item.status,
       ])
     );
-    
-    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+
+    const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -291,27 +339,56 @@ export default function Orders() {
     toast.success('Orders exported');
   }
 
-  // Cancel order item
-  async function cancelOrderItem(orderItemId, reason) {
+  /* ---- Cancel order item ---------------------------------------- */
+  function cancelOrderItem(orderItemId, reason) {
+    updateOrderItem.mutate(
+      { id: orderItemId, data: { status: 'cancelled', notes: `Cancelled: ${reason}` } },
+      {
+        onSuccess: () => toast.success('Order item cancelled'),
+        onError: () => toast.error('Failed to cancel order item'),
+      }
+    );
+  }
+
+  /* ---- Mark as Shipped (updates inventory too) ------------------ */
+  async function markAsShipped(order) {
     try {
-      await base44.entities.OrderItem.update(orderItemId, { 
-        status: 'cancelled',
-        notes: `Cancelled: ${reason}`
-      });
-      toast.success('Order item cancelled');
-      loadData();
-    } catch (error) {
-      toast.error('Failed to cancel order item');
+      // Update order items to shipped
+      await Promise.all(
+        order.items.map((item) =>
+          base44.entities.OrderItem.update(item.id, { status: 'shipped' })
+        )
+      );
+
+      // Update inventory for each item
+      for (const item of order.items) {
+        const product = products.find((p) => p.barcode === item.barcode);
+        if (product) {
+          const newInventory = (product.inventory || 0) - item.quantity;
+          await base44.entities.ProductCatalog.update(product.id, {
+            inventory: Math.max(0, newInventory),
+          });
+        }
+      }
+
+      toast.success('Order marked as shipped, inventory updated');
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    } catch {
+      toast.error('Failed to mark as shipped');
     }
   }
 
+  /* ================================================================ */
+  /*  Render                                                          */
+  /* ================================================================ */
+
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
-        <p className="text-gray-500 mt-1">Manage incoming orders from marketplaces</p>
-      </div>
+      <PageHeader
+        title="Orders"
+        subtitle="Manage incoming orders from marketplaces"
+      />
 
       <Tabs defaultValue="browse" className="space-y-6">
         <TabsList>
@@ -319,33 +396,38 @@ export default function Orders() {
           <TabsTrigger value="upload">Import CSV</TabsTrigger>
         </TabsList>
 
+        {/* -------------------------------------------------------- */}
+        {/*  Browse Tab                                               */}
+        {/* -------------------------------------------------------- */}
         <TabsContent value="browse" className="space-y-6">
           {/* Filters */}
-          <Card>
+          <Card className="border-border bg-card">
             <CardContent className="p-4">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     placeholder="Search by order ID..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 bg-background border-border"
                   />
                 </div>
                 <Select value={filterPlatform} onValueChange={setFilterPlatform}>
-                  <SelectTrigger className="w-full sm:w-48">
+                  <SelectTrigger className="w-full sm:w-48 bg-card border-border text-foreground">
                     <SelectValue placeholder="Filter by platform" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Platforms</SelectItem>
-                    {platforms.map(platform => (
-                      <SelectItem key={platform} value={platform}>{platform}</SelectItem>
+                    {platforms.map((platform) => (
+                      <SelectItem key={platform} value={platform}>
+                        {platform}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-full sm:w-48">
+                  <SelectTrigger className="w-full sm:w-48 bg-card border-border text-foreground">
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -355,31 +437,37 @@ export default function Orders() {
                     <SelectItem value="picked">Picked</SelectItem>
                     <SelectItem value="shipped">Shipped</SelectItem>
                     <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                    </Select>
-                    <Button
-                    variant="outline"
-                    onClick={exportOrders}
-                    className="shrink-0"
-                    >
-                    Export Orders
-                    </Button>
-                    </div>
-                    </CardContent>
-                    </Card>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  onClick={exportOrders}
+                  className="shrink-0"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Export Orders
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Orders Table */}
-          <Card>
+          <Card className="border-border bg-card">
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+                  <Loader2 className="h-8 w-8 text-primary animate-spin" />
                 </div>
               ) : filteredOrders.length === 0 ? (
-                <div className="text-center py-12">
-                  <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No orders found</p>
-                </div>
+                <EmptyState
+                  icon={ShoppingCart}
+                  title="No orders found"
+                  description={
+                    searchQuery || filterStatus !== 'all' || filterPlatform !== 'all'
+                      ? 'Try adjusting your search or filter criteria.'
+                      : 'Import orders from the CSV tab to get started.'
+                  }
+                />
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
@@ -391,188 +479,164 @@ export default function Orders() {
                         <TableHead>Items</TableHead>
                         <TableHead>Total Qty</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="w-12"></TableHead>
-                        </TableRow>
+                        <TableHead className="w-12" />
+                      </TableRow>
                     </TableHeader>
-                    <TableBody>
-                      {currentOrders.map(order => (
-                        <TableRow key={order.id}>
-                          <TableCell>
-                            <Badge variant="secondary">{order.platform_name}</Badge>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm">{order.platform_order_id}</TableCell>
-                          <TableCell>
-                            {order.order_timestamp 
-                              ? new Date(order.order_timestamp).toLocaleDateString()
-                              : '—'
-                            }
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              {order.items.slice(0, 3).map((item, idx) => (
-                                <div key={idx} className="text-sm">
-                                  {getProductName(item.barcode)} × {item.quantity}
-                                </div>
-                              ))}
-                              {order.items.length > 3 && (
-                                <div className="text-sm text-gray-400">
-                                  +{order.items.length - 3} more
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium">{order.totalQty}</TableCell>
-                          <TableCell>
-                            {order.items.every(i => i.status === 'shipped') ? (
-                              <Badge className="bg-purple-100 text-purple-700">
-                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                Shipped
-                              </Badge>
-                            ) : order.items.every(i => i.status === 'picked') ? (
-                              <Badge className="bg-green-100 text-green-700">
-                                <Package className="w-3 h-3 mr-1" />
-                                Picked
-                              </Badge>
-                            ) : order.items.some(i => i.status === 'pending') ? (
-                              <Badge className="bg-amber-100 text-amber-700">
-                                <AlertCircle className="w-3 h-3 mr-1" />
-                                Pending
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-blue-100 text-blue-700">
-                                In Progress
-                              </Badge>
-                            )}
-                            </TableCell>
-                            <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <MoreHorizontal className="w-4 h-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {order.items.every(i => i.status === 'picked') && (
-                                  <DropdownMenuItem 
-                                    onClick={async () => {
-                                      try {
-                                        // Update order items to shipped
-                                        await Promise.all(
-                                          order.items.map(item => 
-                                            base44.entities.OrderItem.update(item.id, { status: 'shipped' })
-                                          )
-                                        );
-                                        
-                                        // Update inventory for each item
-                                        for (const item of order.items) {
-                                          const product = products.find(p => p.barcode === item.barcode);
-                                          if (product) {
-                                            const newInventory = (product.inventory || 0) - item.quantity;
-                                            await base44.entities.ProductCatalog.update(product.id, {
-                                              inventory: Math.max(0, newInventory)
-                                            });
-                                          }
-                                        }
-                                        
-                                        toast.success('Order marked as shipped, inventory updated');
-                                        loadData();
-                                      } catch (error) {
-                                        toast.error('Failed to mark as shipped');
-                                      }
-                                    }}
-                                    className="text-purple-600"
-                                  >
-                                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                                    Mark as Shipped
-                                  </DropdownMenuItem>
-                                )}
-                                {order.items.filter(i => i.status === 'pending').length > 0 && (
-                                  <>
-                                    <DropdownMenuItem 
-                                      onClick={() => {
-                                        order.items
-                                          .filter(i => i.status === 'pending')
-                                          .forEach(item => cancelOrderItem(item.id, 'oos'));
-                                      }}
-                                      className="text-red-600"
-                                    >
-                                      <XCircle className="w-4 h-4 mr-2" />
-                                      Cancel (Out of Stock)
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem 
-                                      onClick={() => {
-                                        order.items
-                                          .filter(i => i.status === 'pending')
-                                          .forEach(item => cancelOrderItem(item.id, 'qc_fail'));
-                                      }}
-                                      className="text-red-600"
-                                    >
-                                      <XCircle className="w-4 h-4 mr-2" />
-                                      Cancel (QC Fail)
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            </TableCell>
-                            </TableRow>
-                            ))}
-                            </TableBody>
-                            </Table>
 
-                  <div className="flex items-center justify-between p-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700">Orders per page:</span>
-                      <Select
-                        value={String(itemsPerPage)}
-                        onValueChange={(value) => {
-                          setItemsPerPage(Number(value));
-                          setCurrentPage(1);
-                        }}
-                      >
-                        <SelectTrigger className="w-20">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="25">25</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                          <SelectItem value="100">100</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                        disabled={currentPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-sm text-gray-700">
-                        Page {currentPage} of {totalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                        disabled={currentPage === totalPages}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                 </div>
+                    <motion.tbody
+                      variants={tableContainerVariants}
+                      initial="hidden"
+                      animate="visible"
+                    >
+                      {currentOrders.map((order) => {
+                        const aggregatedStatus = deriveOrderStatus(order.items);
+
+                        return (
+                          <motion.tr
+                            key={order.id}
+                            variants={tableRowVariants}
+                            className="border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                          >
+                            {/* Platform */}
+                            <TableCell>
+                              <Badge variant="secondary">{order.platform_name}</Badge>
+                            </TableCell>
+
+                            {/* Order ID */}
+                            <TableCell className="font-mono text-sm text-foreground">
+                              {order.platform_order_id}
+                            </TableCell>
+
+                            {/* Date */}
+                            <TableCell className="text-muted-foreground">
+                              {order.order_timestamp
+                                ? new Date(order.order_timestamp).toLocaleDateString()
+                                : '\u2014'}
+                            </TableCell>
+
+                            {/* Items */}
+                            <TableCell>
+                              <div className="space-y-1">
+                                {order.items.slice(0, 3).map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="text-sm text-foreground"
+                                  >
+                                    {getProductName(item.barcode)} &times;{' '}
+                                    {item.quantity}
+                                  </div>
+                                ))}
+                                {order.items.length > 3 && (
+                                  <div className="text-sm text-muted-foreground">
+                                    +{order.items.length - 3} more
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+
+                            {/* Total Qty */}
+                            <TableCell className="font-medium text-foreground">
+                              {order.totalQty}
+                            </TableCell>
+
+                            {/* Status */}
+                            <TableCell>
+                              <StatusBadge status={aggregatedStatus} />
+                            </TableCell>
+
+                            {/* Actions */}
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label="Order actions"
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {order.items.every(
+                                    (i) => i.status === 'picked'
+                                  ) && (
+                                    <DropdownMenuItem
+                                      onClick={() => markAsShipped(order)}
+                                    >
+                                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                                      Mark as Shipped
+                                    </DropdownMenuItem>
+                                  )}
+                                  {order.items.some(
+                                    (i) => i.status === 'pending'
+                                  ) && (
+                                    <>
+                                      <DropdownMenuItem
+                                        className="text-destructive focus:text-destructive"
+                                        onClick={() => {
+                                          order.items
+                                            .filter((i) => i.status === 'pending')
+                                            .forEach((item) =>
+                                              cancelOrderItem(item.id, 'oos')
+                                            );
+                                        }}
+                                      >
+                                        <XCircle className="mr-2 h-4 w-4" />
+                                        Cancel (Out of Stock)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        className="text-destructive focus:text-destructive"
+                                        onClick={() => {
+                                          order.items
+                                            .filter((i) => i.status === 'pending')
+                                            .forEach((item) =>
+                                              cancelOrderItem(item.id, 'qc_fail')
+                                            );
+                                        }}
+                                      >
+                                        <XCircle className="mr-2 h-4 w-4" />
+                                        Cancel (QC Fail)
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </motion.tr>
+                        );
+                      })}
+                    </motion.tbody>
+                  </Table>
+
+                  <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={goToPage}
+                    onPerPageChange={setPerPage}
+                    itemLabel="orders"
+                  />
+                </div>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* -------------------------------------------------------- */}
+        {/*  Upload Tab                                               */}
+        {/* -------------------------------------------------------- */}
         <TabsContent value="upload">
           <CSVUploader
             title="Import Orders CSV"
             description="Import orders from marketplaces. Columns: Platform, OrderID, OrderDate (YYYY-MM-DD format), Barcode, Quantity"
-            expectedColumns={['Platform', 'OrderID', 'OrderDate', 'Barcode', 'Quantity']}
+            expectedColumns={[
+              'Platform',
+              'OrderID',
+              'OrderDate',
+              'Barcode',
+              'Quantity',
+            ]}
             onValidate={validateOrders}
             onConfirm={importOrders}
           />

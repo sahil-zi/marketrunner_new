@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
-import { 
-  Settings, 
-  Users, 
+import { motion } from 'framer-motion';
+import {
+  Users,
   Store as StoreIcon,
   Plus,
   Pencil,
   Trash2,
   Loader2,
   Copy,
-  CheckCircle2
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,64 +40,61 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import PageHeader from '@/components/admin/PageHeader';
+import EmptyState from '@/components/admin/EmptyState';
+import { useStores, useCreateStore, useUpdateStore, useDeleteStore } from '@/hooks/use-stores';
+import { useUsers } from '@/hooks/use-users';
+
+const staggerContainer = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.04,
+    },
+  },
+};
+
+const staggerRow = {
+  hidden: { opacity: 0, y: 8 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.2 } },
+};
 
 export default function AdminSettings() {
-  const [stores, setStores] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: stores = [], isLoading } = useStores();
+  const { data: users = [] } = useUsers();
+  const createStore = useCreateStore();
+  const updateStore = useUpdateStore();
+  const deleteStoreMutation = useDeleteStore();
+
   const [editingStore, setEditingStore] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const [storesData, usersData] = await Promise.all([
-        base44.entities.Store.list(),
-        base44.entities.User.list(),
-      ]);
-      setStores(storesData);
-      setUsers(usersData);
-    } catch (error) {
-      toast.error('Failed to load settings');
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const isSaving = createStore.isPending || updateStore.isPending;
 
   async function saveStore(storeData) {
-    setIsSaving(true);
     try {
       if (editingStore?.id) {
-        await base44.entities.Store.update(editingStore.id, storeData);
+        await updateStore.mutateAsync({ id: editingStore.id, data: storeData });
         toast.success('Store updated');
       } else {
-        await base44.entities.Store.create(storeData);
+        await createStore.mutateAsync(storeData);
         toast.success('Store created');
       }
       setIsDialogOpen(false);
       setEditingStore(null);
-      loadData();
-    } catch (error) {
+    } catch {
       toast.error('Failed to save store');
-    } finally {
-      setIsSaving(false);
     }
   }
 
-  async function deleteStore(id) {
+  async function handleDeleteStore(id) {
     try {
-      await base44.entities.Store.delete(id);
+      await deleteStoreMutation.mutateAsync(id);
       toast.success('Store deleted');
       setDeleteConfirm(null);
-      loadData();
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete store');
     }
   }
@@ -112,25 +110,25 @@ export default function AdminSettings() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-500 mt-1">Manage stores and users</p>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="Manage stores and users"
+      />
 
       {/* Runner Access Link */}
-      <Card className="border-teal-200 bg-teal-50">
+      <Card className="border-primary/20 bg-primary/5">
         <CardHeader>
-          <CardTitle className="text-lg">Runner Access Link</CardTitle>
+          <CardTitle className="text-lg text-foreground">Runner Access Link</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Share this link with runners to access their mobile interface:
           </p>
           <div className="flex gap-2">
             <Input
               value={runnerLoginUrl}
               readOnly
-              className="bg-white"
+              className="bg-card"
             />
             <Button
               onClick={copyRunnerLink}
@@ -153,12 +151,11 @@ export default function AdminSettings() {
       </Card>
 
       {/* Stores */}
-      <Card>
+      <Card className="bg-card">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Stores</CardTitle>
-          <Button 
+          <CardTitle className="text-foreground">Stores</CardTitle>
+          <Button
             onClick={() => { setEditingStore({}); setIsDialogOpen(true); }}
-            className="bg-teal-600 hover:bg-teal-700"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Store
@@ -167,13 +164,14 @@ export default function AdminSettings() {
         <CardContent>
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
             </div>
           ) : stores.length === 0 ? (
-            <div className="text-center py-8">
-              <StoreIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No stores yet</p>
-            </div>
+            <EmptyState
+              icon={StoreIcon}
+              title="No stores yet"
+              description="Add your first store to get started."
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -184,32 +182,43 @@ export default function AdminSettings() {
                   <TableHead className="w-24">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {stores.map(store => (
-                  <TableRow key={store.id}>
-                    <TableCell className="font-medium">{store.name}</TableCell>
-                    <TableCell>{store.location || '—'}</TableCell>
-                    <TableCell>{store.contact_info || '—'}</TableCell>
+              <TableBody
+                as={motion.tbody}
+                variants={staggerContainer}
+                initial="hidden"
+                animate="visible"
+              >
+                {stores.map((store, i) => (
+                  <motion.tr
+                    key={store.id}
+                    variants={staggerRow}
+                    className="border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                  >
+                    <TableCell className="font-medium text-foreground">{store.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{store.location || '\u2014'}</TableCell>
+                    <TableCell className="text-muted-foreground">{store.contact_info || '\u2014'}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="icon"
+                          aria-label={`Edit store ${store.name}`}
                           onClick={() => { setEditingStore(store); setIsDialogOpen(true); }}
                         >
                           <Pencil className="w-4 h-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="icon"
+                          aria-label={`Delete store ${store.name}`}
                           onClick={() => setDeleteConfirm(store)}
-                          className="text-red-500 hover:text-red-700"
+                          className="text-destructive hover:text-destructive"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
                     </TableCell>
-                  </TableRow>
+                  </motion.tr>
                 ))}
               </TableBody>
             </Table>
@@ -218,17 +227,18 @@ export default function AdminSettings() {
       </Card>
 
       {/* Users */}
-      <Card>
+      <Card className="bg-card">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Users</CardTitle>
-          <AddUserButton onSuccess={loadData} />
+          <CardTitle className="text-foreground">Users</CardTitle>
+          <AddUserButton />
         </CardHeader>
         <CardContent>
           {users.length === 0 ? (
-            <div className="text-center py-8">
-              <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No users yet</p>
-            </div>
+            <EmptyState
+              icon={Users}
+              title="No users yet"
+              description="Invite users to collaborate on your workspace."
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -238,17 +248,26 @@ export default function AdminSettings() {
                   <TableHead>Role</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {users.map(user => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.full_name || '—'}</TableCell>
-                    <TableCell>{user.email}</TableCell>
+              <TableBody
+                as={motion.tbody}
+                variants={staggerContainer}
+                initial="hidden"
+                animate="visible"
+              >
+                {users.map((user) => (
+                  <motion.tr
+                    key={user.id}
+                    variants={staggerRow}
+                    className="border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                  >
+                    <TableCell className="font-medium text-foreground">{user.full_name || '\u2014'}</TableCell>
+                    <TableCell className="text-muted-foreground">{user.email}</TableCell>
                     <TableCell>
                       <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
                         {user.role}
                       </Badge>
                     </TableCell>
-                  </TableRow>
+                  </motion.tr>
                 ))}
               </TableBody>
             </Table>
@@ -269,19 +288,23 @@ export default function AdminSettings() {
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Store</DialogTitle>
+            <DialogTitle className="text-foreground">Delete Store</DialogTitle>
           </DialogHeader>
-          <p className="text-gray-600">
-            Are you sure you want to delete <strong>{deleteConfirm?.name}</strong>?
+          <p className="text-muted-foreground">
+            Are you sure you want to delete <strong className="text-foreground">{deleteConfirm?.name}</strong>?
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
-              onClick={() => deleteStore(deleteConfirm.id)}
+            <Button
+              variant="destructive"
+              onClick={() => handleDeleteStore(deleteConfirm.id)}
+              disabled={deleteStoreMutation.isPending}
             >
+              {deleteStoreMutation.isPending && (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              )}
               Delete
             </Button>
           </DialogFooter>
@@ -313,42 +336,47 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{store?.id ? 'Edit Store' : 'Add Store'}</DialogTitle>
+          <DialogTitle className="text-foreground">
+            {store?.id ? 'Edit Store' : 'Add Store'}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="name">Store Name *</Label>
+            <Label htmlFor="name" className="text-foreground">Store Name *</Label>
             <Input
               id="name"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="bg-muted"
               required
             />
           </div>
           <div>
-            <Label htmlFor="location">Location (Dubai Address)</Label>
+            <Label htmlFor="location" className="text-foreground">Location (Dubai Address)</Label>
             <Input
               id="location"
               value={formData.location}
               onChange={(e) => setFormData({ ...formData, location: e.target.value })}
               placeholder="Dubai Mall, Downtown Dubai"
+              className="bg-muted"
             />
           </div>
           <div>
-            <Label htmlFor="contact_info">Contact Info (UAE Phone Number)</Label>
+            <Label htmlFor="contact_info" className="text-foreground">Contact Info (UAE Phone Number)</Label>
             <Input
               id="contact_info"
               value={formData.contact_info}
               onChange={(e) => setFormData({ ...formData, contact_info: e.target.value })}
               placeholder="+971 50 123 4567"
+              className="bg-muted"
             />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving} className="bg-teal-600 hover:bg-teal-700">
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            <Button type="submit" disabled={isSaving}>
+              {isSaving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {store?.id ? 'Update' : 'Create'}
             </Button>
           </DialogFooter>
@@ -358,7 +386,8 @@ function StoreDialog({ store, isOpen, onClose, onSave, isSaving }) {
   );
 }
 
-function AddUserButton({ onSuccess }) {
+function AddUserButton() {
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -380,7 +409,7 @@ function AddUserButton({ onSuccess }) {
       setEmail('');
       setFullName('');
       setRole('user');
-      onSuccess();
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (error) {
       toast.error(error.message || 'Failed to add user');
     } finally {
@@ -390,10 +419,7 @@ function AddUserButton({ onSuccess }) {
 
   return (
     <>
-      <Button 
-        onClick={() => setIsOpen(true)}
-        className="bg-teal-600 hover:bg-teal-700"
-      >
+      <Button onClick={() => setIsOpen(true)}>
         <Plus className="w-4 h-4 mr-2" />
         Add User
       </Button>
@@ -401,35 +427,39 @@ function AddUserButton({ onSuccess }) {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add New User</DialogTitle>
+            <DialogTitle className="text-foreground">Add New User</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAddUser} className="space-y-4">
             <div>
-              <Label htmlFor="email">Email Address *</Label>
+              <Label htmlFor="email" className="text-foreground">Email Address *</Label>
               <Input
                 id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="user@example.com"
+                className="bg-muted"
                 required
               />
-              <p className="text-xs text-gray-500 mt-1">An email with a password setup link will be sent to this address.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                An email with a password setup link will be sent to this address.
+              </p>
             </div>
             <div>
-              <Label htmlFor="fullName">Full Name</Label>
+              <Label htmlFor="fullName" className="text-foreground">Full Name</Label>
               <Input
                 id="fullName"
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="John Doe"
+                className="bg-muted"
               />
             </div>
             <div>
-              <Label htmlFor="role">Role *</Label>
+              <Label htmlFor="role" className="text-foreground">Role *</Label>
               <Select value={role} onValueChange={setRole}>
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -442,8 +472,8 @@ function AddUserButton({ onSuccess }) {
               <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isAddingUser} className="bg-teal-600 hover:bg-teal-700">
-                {isAddingUser ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              <Button type="submit" disabled={isAddingUser}>
+                {isAddingUser && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
                 Add User
               </Button>
             </DialogFooter>

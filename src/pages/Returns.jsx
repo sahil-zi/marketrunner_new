@@ -1,18 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
-import { 
-  PackageX, 
-  Search, 
-  Filter, 
+import {
+  PackageX,
+  Search,
   Loader2,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  Eye
+  Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -39,67 +36,72 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import CSVUploader from '@/components/admin/CSVUploader';
+import PageHeader from '@/components/admin/PageHeader';
+import StatusBadge from '@/components/admin/StatusBadge';
+import EmptyState from '@/components/admin/EmptyState';
+import { useReturns, useUpdateReturn } from '@/hooks/use-returns';
+import { useStores } from '@/hooks/use-stores';
+import { usePagination } from '@/hooks/use-pagination';
+
+const reasonLabels = {
+  damaged: 'Damaged',
+  wrong_item: 'Wrong Item',
+  customer_return: 'Customer Return',
+  quality_issue: 'Quality Issue',
+  other: 'Other',
+};
 
 export default function Returns() {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [returns, setReturns] = useState([]);
-  const [stores, setStores] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+
+  // React Query data
+  const { data: returns = [], isLoading } = useReturns();
+  const { data: stores = [] } = useStores();
+  const updateReturn = useUpdateReturn();
+
+  // UI state
   const [filterStore, setFilterStore] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewReturn, setViewReturn] = useState(null);
   const [processingReturn, setProcessingReturn] = useState(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const [returnsData, storesData] = await Promise.all([
-        base44.entities.Return.list('-created_date'),
-        base44.entities.Store.list(),
-      ]);
-      setReturns(returnsData);
-      setStores(storesData);
-    } catch (error) {
-      toast.error('Failed to load returns');
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  const filteredReturns = React.useMemo(() => {
-    const filtered = returns.filter(ret => {
+  const filteredReturns = useMemo(() => {
+    return returns.filter((ret) => {
       const matchesStore = filterStore === 'all' || ret.store_id === filterStore;
       const matchesStatus = filterStatus === 'all' || ret.status === filterStatus;
-      const matchesSearch = 
+      const matchesSearch =
+        !searchQuery ||
         ret.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ret.style_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ret.store_name?.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesStore && matchesStatus && matchesSearch;
     });
-    return filtered;
   }, [returns, filterStore, filterStatus, searchQuery]);
 
-  const totalPages = Math.ceil(filteredReturns.length / itemsPerPage);
-  const currentReturns = React.useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return filteredReturns.slice(startIndex, endIndex);
-  }, [filteredReturns, currentPage, itemsPerPage]);
+  const {
+    paginatedItems: currentReturns,
+    currentPage,
+    totalPages,
+    itemsPerPage,
+    setPerPage,
+    nextPage,
+    prevPage,
+    hasNextPage,
+    hasPrevPage,
+  } = usePagination(filteredReturns);
 
   async function processReturn(returnId, status) {
     setProcessingReturn(returnId);
     try {
-      const returnItem = returns.find(r => r.id === returnId);
-      
-      await base44.entities.Return.update(returnId, {
-        status,
-        processed_at: new Date().toISOString(),
+      const returnItem = returns.find((r) => r.id === returnId);
+
+      await updateReturn.mutateAsync({
+        id: returnId,
+        data: {
+          status,
+          processed_at: new Date().toISOString(),
+        },
       });
 
       // If approved, create a credit ledger entry and update inventory
@@ -116,16 +118,20 @@ export default function Returns() {
         }
 
         // Update inventory
-        const products = await base44.entities.ProductCatalog.filter({ barcode: returnItem.barcode });
+        const products = await base44.entities.ProductCatalog.filter({
+          barcode: returnItem.barcode,
+        });
         if (products.length > 0) {
           const product = products[0];
           const newInventory = (product.inventory || 0) + returnItem.quantity;
-          await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+          await base44.entities.ProductCatalog.update(product.id, {
+            inventory: newInventory,
+          });
         }
       }
 
+      queryClient.invalidateQueries({ queryKey: ['returns'] });
       toast.success(`Return ${status}`);
-      loadData();
     } catch (error) {
       toast.error('Failed to process return');
     } finally {
@@ -133,12 +139,14 @@ export default function Returns() {
     }
   }
 
-  async function validateReturns(rows, headers) {
+  async function validateReturns(rows) {
     const errors = [];
     const warnings = [];
-    const existingStores = new Map(stores.map(s => [s.name.toLowerCase(), s.id]));
+    const existingStores = new Map(
+      stores.map((s) => [s.name.toLowerCase(), s.id])
+    );
 
-    rows.forEach((row, idx) => {
+    rows.forEach((row) => {
       if (!row.Barcode?.trim()) {
         errors.push({ row: row._rowNum, message: 'Missing barcode' });
       }
@@ -155,7 +163,10 @@ export default function Returns() {
         errors.push({ row: row._rowNum, message: 'Invalid return amount' });
       }
       if (row.StoreName && !existingStores.has(row.StoreName.toLowerCase())) {
-        warnings.push({ row: row._rowNum, message: `New store will be created: ${row.StoreName}` });
+        warnings.push({
+          row: row._rowNum,
+          message: `New store will be created: ${row.StoreName}`,
+        });
       }
     });
 
@@ -171,19 +182,23 @@ export default function Returns() {
     };
   }
 
-  async function importReturns(rows, mode) {
-    const existingStores = new Map(stores.map(s => [s.name.toLowerCase(), s.id]));
-    const newStoreNames = [...new Set(
-      rows
-        .map(r => r.StoreName?.trim())
-        .filter(name => name && !existingStores.has(name.toLowerCase()))
-    )];
+  async function importReturns(rows) {
+    const existingStores = new Map(
+      stores.map((s) => [s.name.toLowerCase(), s.id])
+    );
+    const newStoreNames = [
+      ...new Set(
+        rows
+          .map((r) => r.StoreName?.trim())
+          .filter((name) => name && !existingStores.has(name.toLowerCase()))
+      ),
+    ];
 
     if (newStoreNames.length > 0) {
       const createdStores = await base44.entities.Store.bulkCreate(
-        newStoreNames.map(name => ({ name }))
+        newStoreNames.map((name) => ({ name }))
       );
-      createdStores.forEach(store => {
+      createdStores.forEach((store) => {
         existingStores.set(store.name.toLowerCase(), store.id);
       });
     }
@@ -216,22 +231,24 @@ export default function Returns() {
 
       productsToUpdateInventory.push({
         barcode: row.Barcode?.trim(),
-        quantity: parseInt(row.Quantity) || 0
+        quantity: parseInt(row.Quantity) || 0,
       });
     }
 
     if (returnsToCreate.length > 0) {
       await base44.entities.Return.bulkCreate(returnsToCreate);
-      
+
       // Update inventory
       const productCatalog = await base44.entities.ProductCatalog.list();
-      const productMap = new Map(productCatalog.map(p => [p.barcode, p]));
+      const productMap = new Map(productCatalog.map((p) => [p.barcode, p]));
 
       for (const item of productsToUpdateInventory) {
         const product = productMap.get(item.barcode);
         if (product) {
           const newInventory = (product.inventory || 0) + item.quantity;
-          await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+          await base44.entities.ProductCatalog.update(product.id, {
+            inventory: newInventory,
+          });
         }
       }
 
@@ -250,33 +267,19 @@ export default function Returns() {
       }
 
       toast.success(`Imported ${returnsToCreate.length} returns`);
-      loadData();
+      queryClient.invalidateQueries({ queryKey: ['returns'] });
+      queryClient.invalidateQueries({ queryKey: ['stores'] });
     } else {
       toast.info('No new returns to import');
     }
   }
 
-  const statusConfig = {
-    pending: { color: 'bg-amber-100 text-amber-700', icon: Clock, label: 'Pending' },
-    assigned_to_run: { color: 'bg-blue-100 text-blue-700', icon: Clock, label: 'Assigned to Run' },
-    processed: { color: 'bg-green-100 text-green-700', icon: CheckCircle2, label: 'Processed' },
-    rejected: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'Rejected' },
-  };
-
-  const reasonLabels = {
-    damaged: 'Damaged',
-    wrong_item: 'Wrong Item',
-    customer_return: 'Customer Return',
-    quality_issue: 'Quality Issue',
-    other: 'Other',
-  };
-
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Returns</h1>
-        <p className="text-gray-500 mt-1">Manage product returns from stores</p>
-      </div>
+      <PageHeader
+        title="Returns"
+        subtitle="Manage product returns from stores"
+      />
 
       <Tabs defaultValue="browse" className="space-y-6">
         <TabsList>
@@ -285,11 +288,12 @@ export default function Returns() {
         </TabsList>
 
         <TabsContent value="browse" className="space-y-6">
+          {/* Filter card */}
           <Card>
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row gap-4">
                 <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Search by barcode, product, or store..."
                     value={searchQuery}
@@ -303,8 +307,10 @@ export default function Returns() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Stores</SelectItem>
-                    {stores.map(store => (
-                      <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+                    {stores.map((store) => (
+                      <SelectItem key={store.id} value={store.id}>
+                        {store.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -324,17 +330,19 @@ export default function Returns() {
             </CardContent>
           </Card>
 
+          {/* Returns table */}
           <Card>
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
                 </div>
               ) : filteredReturns.length === 0 ? (
-                <div className="text-center py-12">
-                  <PackageX className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No returns found</p>
-                </div>
+                <EmptyState
+                  icon={PackageX}
+                  title="No returns found"
+                  description="Try adjusting your search or filter criteria."
+                />
               ) : (
                 <div>
                   <Table>
@@ -352,82 +360,86 @@ export default function Returns() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {currentReturns.map(ret => {
-                        const status = statusConfig[ret.status] || statusConfig.pending;
-                        const StatusIcon = status.icon;
-                        
-                        return (
-                          <TableRow key={ret.id}>
-                            <TableCell>
-                              {ret.created_date 
-                                ? new Date(ret.created_date).toLocaleDateString()
-                                : '—'
-                              }
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{ret.store_name}</Badge>
-                            </TableCell>
-                            <TableCell className="font-medium">{ret.style_name}</TableCell>
-                            <TableCell>{ret.size || '—'}</TableCell>
-                            <TableCell className="text-right">{ret.quantity}</TableCell>
-                            <TableCell>{reasonLabels[ret.reason] || ret.reason}</TableCell>
-                            <TableCell className="text-right font-medium">
-                              AED {ret.return_amount?.toFixed(2) || '0.00'}
-                            </TableCell>
-                            <TableCell>
-                              <Badge className={status.color}>
-                                <StatusIcon className="w-3 h-3 mr-1" />
-                                {status.label}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setViewReturn(ret)}
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                                {ret.status === 'pending' && (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => processReturn(ret.id, 'processed')}
-                                      disabled={processingReturn === ret.id}
-                                      className="text-green-600 hover:text-green-700"
-                                    >
-                                      Approve
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => processReturn(ret.id, 'rejected')}
-                                      disabled={processingReturn === ret.id}
-                                      className="text-red-600 hover:text-red-700"
-                                    >
-                                      Reject
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {currentReturns.map((ret) => (
+                        <TableRow key={ret.id}>
+                          <TableCell className="text-muted-foreground">
+                            {ret.created_date
+                              ? new Date(ret.created_date).toLocaleDateString()
+                              : '\u2014'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary">{ret.store_name}</Badge>
+                          </TableCell>
+                          <TableCell className="font-medium text-foreground">
+                            {ret.style_name}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {ret.size || '\u2014'}
+                          </TableCell>
+                          <TableCell className="text-right text-foreground">
+                            {ret.quantity}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {reasonLabels[ret.reason] || ret.reason}
+                          </TableCell>
+                          <TableCell className="text-right font-medium text-primary">
+                            AED {ret.return_amount?.toFixed(2) || '0.00'}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={ret.status} />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="View return details"
+                                onClick={() => setViewReturn(ret)}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                              {ret.status === 'pending' && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-success"
+                                    onClick={() =>
+                                      processReturn(ret.id, 'processed')
+                                    }
+                                    disabled={processingReturn === ret.id}
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive"
+                                    onClick={() =>
+                                      processReturn(ret.id, 'rejected')
+                                    }
+                                    disabled={processingReturn === ret.id}
+                                  >
+                                    Reject
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
 
-                  <div className="flex items-center justify-between p-4">
+                  {/* Pagination */}
+                  <div className="flex items-center justify-between p-4 border-t border-border">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700">Returns per page:</span>
+                      <span className="text-sm text-muted-foreground">
+                        Returns per page:
+                      </span>
                       <Select
                         value={String(itemsPerPage)}
-                        onValueChange={(value) => {
-                          setItemsPerPage(Number(value));
-                          setCurrentPage(1);
-                        }}
+                        onValueChange={(value) => setPerPage(Number(value))}
                       >
                         <SelectTrigger className="w-20">
                           <SelectValue />
@@ -443,19 +455,19 @@ export default function Returns() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                        disabled={currentPage === 1}
+                        onClick={prevPage}
+                        disabled={!hasPrevPage}
                       >
                         Previous
                       </Button>
-                      <span className="text-sm text-gray-700">
+                      <span className="text-sm text-muted-foreground">
                         Page {currentPage} of {totalPages}
                       </span>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                        disabled={currentPage === totalPages}
+                        onClick={nextPage}
+                        disabled={!hasNextPage}
                       >
                         Next
                       </Button>
@@ -488,42 +500,62 @@ export default function Returns() {
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-sm text-gray-500">Store</p>
-                  <p className="font-medium">{viewReturn.store_name}</p>
+                  <p className="text-sm text-muted-foreground">Store</p>
+                  <p className="font-medium text-foreground">
+                    {viewReturn.store_name}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Product</p>
-                  <p className="font-medium">{viewReturn.style_name}</p>
+                  <p className="text-sm text-muted-foreground">Product</p>
+                  <p className="font-medium text-foreground">
+                    {viewReturn.style_name}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Size</p>
-                  <p className="font-medium">{viewReturn.size || '—'}</p>
+                  <p className="text-sm text-muted-foreground">Size</p>
+                  <p className="font-medium text-foreground">
+                    {viewReturn.size || '\u2014'}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Quantity</p>
-                  <p className="font-medium">{viewReturn.quantity}</p>
+                  <p className="text-sm text-muted-foreground">Quantity</p>
+                  <p className="font-medium text-foreground">
+                    {viewReturn.quantity}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Reason</p>
-                  <p className="font-medium">{reasonLabels[viewReturn.reason]}</p>
+                  <p className="text-sm text-muted-foreground">Reason</p>
+                  <p className="font-medium text-foreground">
+                    {reasonLabels[viewReturn.reason]}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Amount</p>
-                  <p className="font-medium text-teal-600">
+                  <p className="text-sm text-muted-foreground">Amount</p>
+                  <p className="font-medium text-primary">
                     AED {viewReturn.return_amount?.toFixed(2) || '0.00'}
                   </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Barcode</p>
+                  <p className="font-medium text-foreground">
+                    {viewReturn.barcode}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  <StatusBadge status={viewReturn.status} />
                 </div>
               </div>
               {viewReturn.notes && (
                 <div>
-                  <p className="text-sm text-gray-500 mb-1">Notes</p>
-                  <p className="text-sm">{viewReturn.notes}</p>
+                  <p className="text-sm text-muted-foreground mb-1">Notes</p>
+                  <p className="text-sm text-foreground">{viewReturn.notes}</p>
                 </div>
               )}
               {viewReturn.image_url && (
                 <div>
-                  <p className="text-sm text-gray-500 mb-2">Photo</p>
-                  <img 
+                  <p className="text-sm text-muted-foreground mb-2">Photo</p>
+                  <img
                     src={viewReturn.image_url}
                     alt="Return item"
                     className="w-full h-48 object-cover rounded-lg cursor-pointer"

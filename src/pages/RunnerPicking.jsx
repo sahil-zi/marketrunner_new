@@ -1,9 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { 
-  ArrowLeft, 
+import { useQueryClient } from '@tanstack/react-query';
+import { useRunById, useRunItems, useUpdateRunItem } from '@/hooks/use-runs';
+import { useStores } from '@/hooks/use-stores';
+import EmptyState from '@/components/admin/EmptyState';
+import {
+  ArrowLeft,
   Store as StoreIcon,
   Minus,
   Plus,
@@ -13,7 +17,6 @@ import {
   Loader2,
   Image as ImageIcon,
   X,
-  Upload
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -30,10 +33,32 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 
 export default function RunnerPicking() {
-  const [run, setRun] = useState(null);
-  const [runItems, setRunItems] = useState([]);
-  const [store, setStore] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const updateRunItem = useUpdateRunItem();
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const runId = urlParams.get('runId');
+  const storeId = urlParams.get('storeId');
+
+  // React Query hooks
+  const { data: run, isLoading: runLoading } = useRunById(runId);
+  const { data: allRunItems = [], isLoading: itemsLoading } = useRunItems(runId);
+  const { data: stores = [], isLoading: storesLoading } = useStores();
+
+  // Derived data
+  const runItems = useMemo(
+    () => allRunItems.filter(i => i.store_id === storeId),
+    [allRunItems, storeId]
+  );
+  const store = useMemo(
+    () => stores.find(s => s.id === storeId),
+    [stores, storeId]
+  );
+
+  const isLoading = runLoading || itemsLoading || storesLoading;
+
+  // Local UI state
   const [isSaving, setIsSaving] = useState(false);
   const [showConfirmZero, setShowConfirmZero] = useState(null);
   const [holdProgress, setHoldProgress] = useState(0);
@@ -43,49 +68,14 @@ export default function RunnerPicking() {
   const [notes, setNotes] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [viewImage, setViewImage] = useState(null);
+
   const holdTimer = useRef(null);
   const fileInputRef = useRef(null);
-  const navigate = useNavigate();
 
-  const urlParams = new URLSearchParams(window.location.search);
-  const runId = urlParams.get('runId');
-  const storeId = urlParams.get('storeId');
-
-  useEffect(() => {
-    if (runId && storeId) {
-      loadData();
-    }
-    return () => {
-      if (holdTimer.current) clearInterval(holdTimer.current);
-    };
-  }, [runId, storeId]);
-
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const [runsData, itemsData, storesData] = await Promise.all([
-        base44.entities.Run.list(),
-        base44.entities.RunItem.filter({ run_id: runId }),
-        base44.entities.Store.list(),
-      ]);
-
-      const foundRun = runsData.find(r => r.id === runId);
-      const foundStore = storesData.find(s => s.id === storeId);
-      const storeItems = itemsData.filter(i => i.store_id === storeId);
-
-      setRun(foundRun);
-      setStore(foundStore);
-      setRunItems(storeItems);
-    } catch (error) {
-      console.error('Failed to load data');
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  const styleGroups = React.useMemo(() => {
+  // Group items by style
+  const styleGroups = useMemo(() => {
     const groups = {};
-    
+
     runItems.forEach(item => {
       const styleName = item.style_name || 'Unknown';
       const key = `${styleName}-${item.type}`;
@@ -106,14 +96,17 @@ export default function RunnerPicking() {
     });
   }, [runItems]);
 
+  // Computed totals
+  const totalTarget = runItems.reduce((sum, i) => sum + (i.target_qty || 0), 0);
+  const totalPicked = runItems.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
+  const progress = totalTarget > 0 ? Math.round((totalPicked / totalTarget) * 100) : 0;
+  const unpickedItems = runItems.filter(i => i.target_qty > 0 && (i.picked_qty || 0) === 0);
+
   async function updatePickedQty(item, delta) {
     const newQty = Math.max(0, Math.min((item.picked_qty || 0) + delta, item.target_qty + 10));
-    
+
     try {
-      await base44.entities.RunItem.update(item.id, { picked_qty: newQty });
-      setRunItems(prev => 
-        prev.map(i => i.id === item.id ? { ...i, picked_qty: newQty } : i)
-      );
+      await updateRunItem.mutateAsync({ id: item.id, data: { picked_qty: newQty } });
     } catch (error) {
       toast.error('Failed to update');
     }
@@ -144,13 +137,10 @@ export default function RunnerPicking() {
 
   const confirmZero = async (item) => {
     try {
-      await base44.entities.RunItem.update(item.id, { 
-        picked_qty: 0, 
-        status: 'not_found' 
+      await updateRunItem.mutateAsync({
+        id: item.id,
+        data: { picked_qty: 0, status: 'not_found' },
       });
-      setRunItems(prev => 
-        prev.map(i => i.id === item.id ? { ...i, picked_qty: 0, status: 'not_found' } : i)
-      );
       toast.success('Marked as unavailable');
     } catch (error) {
       toast.error('Failed to update');
@@ -194,7 +184,7 @@ export default function RunnerPicking() {
       const returnAmount = runItems
         .filter(item => item.type === 'return')
         .reduce((sum, item) => sum + ((item.picked_qty || 0) * (item.cost_price || 0)), 0);
-      
+
       const netAmount = pickupAmount - returnAmount;
 
       await base44.entities.RunConfirmation.create({
@@ -222,11 +212,11 @@ export default function RunnerPicking() {
       for (const item of runItems) {
         const newStatus = item.picked_qty > 0 ? (item.type === 'return' ? 'returned' : 'picked') : 'not_found';
         await base44.entities.RunItem.update(item.id, { status: newStatus });
-        
+
         if (item.type === 'pickup') {
-          const relatedOrderItems = await base44.entities.OrderItem.filter({ 
+          const relatedOrderItems = await base44.entities.OrderItem.filter({
             barcode: item.barcode,
-            run_id: runId 
+            run_id: runId,
           });
           for (const orderItem of relatedOrderItems) {
             await base44.entities.OrderItem.update(orderItem.id, { status: newStatus });
@@ -242,11 +232,11 @@ export default function RunnerPicking() {
           }
         } else if (item.type === 'return' && item.original_return_id) {
           const returnStatus = item.picked_qty > 0 ? 'processed' : 'rejected';
-          await base44.entities.Return.update(item.original_return_id, { 
+          await base44.entities.Return.update(item.original_return_id, {
             status: returnStatus,
             processed_at: new Date().toISOString(),
           });
-          
+
           if (item.picked_qty > 0) {
             const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
             if (products.length > 0) {
@@ -258,6 +248,10 @@ export default function RunnerPicking() {
         }
       }
 
+      // Invalidate all relevant queries after store completion
+      queryClient.invalidateQueries({ queryKey: ['runItems'] });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
+
       toast.success(`Store confirmed - Net: AED ${netAmount.toFixed(2)}`);
       navigate(createPageUrl(`RunnerPickStore?runId=${runId}`));
     } catch (error) {
@@ -268,16 +262,52 @@ export default function RunnerPicking() {
     }
   }
 
-  const totalTarget = runItems.reduce((sum, i) => sum + (i.target_qty || 0), 0);
-  const totalPicked = runItems.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
-  const progress = totalTarget > 0 ? Math.round((totalPicked / totalTarget) * 100) : 0;
-
-  const unpickedItems = runItems.filter(i => i.target_qty > 0 && (i.picked_qty || 0) === 0);
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-10 h-10 text-teal-600 animate-spin" />
+        <Loader2 className="w-10 h-10 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (!run || !store) {
+    return (
+      <EmptyState
+        icon={StoreIcon}
+        title="Store not found"
+        description="The run or store could not be loaded."
+        action={
+          <Link to={createPageUrl('RunnerPickStore')}>
+            <Button>Go Back</Button>
+          </Link>
+        }
+      />
+    );
+  }
+
+  if (runItems.length === 0) {
+    return (
+      <div>
+        <div className="bg-card border-b border-border px-4 py-4 sticky top-[60px] z-40">
+          <div className="flex items-center gap-4">
+            <Link to={createPageUrl(`RunnerPickStore?runId=${runId}`)}>
+              <Button variant="ghost" size="icon" className="shrink-0" aria-label="Back to store list">
+                <ArrowLeft className="w-6 h-6" />
+              </Button>
+            </Link>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <StoreIcon className="w-5 h-5 text-primary" />
+                <h1 className="text-xl font-bold text-foreground">{store.name}</h1>
+              </div>
+            </div>
+          </div>
+        </div>
+        <EmptyState
+          icon={StoreIcon}
+          title="No items for this store"
+          description="There are no items to pick at this store."
+        />
       </div>
     );
   }
@@ -285,26 +315,26 @@ export default function RunnerPicking() {
   return (
     <div className="pb-32">
       {/* Header */}
-      <div className="bg-white border-b px-4 py-4 sticky top-[60px] z-40">
+      <div className="bg-card border-b border-border px-4 py-4 sticky top-[60px] z-40">
         <div className="flex items-center gap-4">
           <Link to={createPageUrl(`RunnerPickStore?runId=${runId}`)}>
-            <Button variant="ghost" size="icon" className="shrink-0">
+            <Button variant="ghost" size="icon" className="shrink-0" aria-label="Back to store list">
               <ArrowLeft className="w-6 h-6" />
             </Button>
           </Link>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <StoreIcon className="w-5 h-5 text-teal-600" />
-              <h1 className="text-xl font-bold text-gray-900">{store?.name || 'Store'}</h1>
+              <StoreIcon className="w-5 h-5 text-primary" />
+              <h1 className="text-xl font-bold text-foreground">{store.name}</h1>
             </div>
-            <p className="text-gray-500 text-sm">
+            <p className="text-muted-foreground text-sm">
               {totalPicked} / {totalTarget} items handled
             </p>
           </div>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-2 mt-3 overflow-hidden">
-          <div 
-            className="bg-teal-600 h-full transition-all duration-300"
+        <div className="w-full bg-muted rounded-full h-2 mt-3 overflow-hidden">
+          <div
+            className="bg-primary h-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -315,9 +345,9 @@ export default function RunnerPicking() {
         {styleGroups.map(group => (
           <Card key={`${group.styleName}-${group.type}`} className="overflow-hidden">
             {/* Style Header */}
-            <div className={`p-4 flex gap-4 ${group.type === 'return' ? 'bg-purple-50' : 'bg-gray-50'}`}>
+            <div className={`p-4 flex gap-4 ${group.type === 'return' ? 'bg-purple-500/10' : 'bg-muted/50'}`}>
               {group.imageUrl ? (
-                <img 
+                <img
                   src={group.imageUrl}
                   alt={group.styleName}
                   className="w-24 h-24 object-cover rounded-xl cursor-pointer"
@@ -325,43 +355,42 @@ export default function RunnerPicking() {
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
               ) : (
-                <div className="w-24 h-24 bg-gray-200 rounded-xl flex items-center justify-center">
-                  <ImageIcon className="w-10 h-10 text-gray-400" />
+                <div className="w-24 h-24 bg-muted rounded-xl flex items-center justify-center">
+                  <ImageIcon className="w-10 h-10 text-muted-foreground" />
                 </div>
               )}
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold text-gray-900">{group.styleName}</h3>
+                  <h3 className="text-lg font-bold text-foreground">{group.styleName}</h3>
                   {group.type === 'return' && (
-                    <Badge className="bg-purple-100 text-purple-700">Return</Badge>
+                    <Badge className="bg-purple-500/15 text-purple-400">Return</Badge>
                   )}
                 </div>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-muted-foreground mt-1">
                   {group.items.length} size{group.items.length > 1 ? 's' : ''}
                 </p>
               </div>
             </div>
 
             {/* Size Items */}
-            <CardContent className="p-0 divide-y">
+            <CardContent className="p-0 divide-y divide-border">
               {group.items.map(item => {
                 const isComplete = item.picked_qty >= item.target_qty;
-                const isPartial = item.picked_qty > 0 && item.picked_qty < item.target_qty;
                 const isZero = item.target_qty > 0 && (item.picked_qty || 0) === 0;
 
                 return (
-                  <div 
+                  <div
                     key={item.id}
                     className={`p-4 flex items-center justify-between ${
-                      isComplete ? 'bg-green-50' : isZero ? 'bg-red-50' : ''
+                      isComplete ? 'bg-success/5' : isZero ? 'bg-destructive/5' : ''
                     }`}
                   >
                     <div>
-                      <p className="text-lg font-semibold text-gray-900">
+                      <p className="text-lg font-semibold text-foreground">
                         Size {item.size || 'N/A'}
                       </p>
-                      <p className="text-sm text-gray-500">
-                        {item.type === 'return' ? 'Return' : 'Need'}: <span className="font-bold text-gray-700">{item.target_qty}</span>
+                      <p className="text-sm text-muted-foreground">
+                        {item.type === 'return' ? 'Return' : 'Need'}: <span className="font-bold text-foreground">{item.target_qty}</span>
                       </p>
                     </div>
 
@@ -371,6 +400,7 @@ export default function RunnerPicking() {
                         variant="outline"
                         size="icon"
                         className="w-12 h-12 rounded-xl"
+                        aria-label={`Decrease quantity for ${item.style_name} size ${item.size}`}
                         onClick={() => {
                           if ((item.picked_qty || 0) === 1 && item.target_qty > 0) {
                             startHold(item);
@@ -382,17 +412,18 @@ export default function RunnerPicking() {
                       >
                         <Minus className="w-6 h-6" />
                       </Button>
-                      
+
                       <span className={`text-3xl font-bold w-12 text-center ${
-                        isComplete ? 'text-green-600' : isZero ? 'text-red-600' : 'text-gray-900'
+                        isComplete ? 'text-success' : isZero ? 'text-destructive' : 'text-foreground'
                       }`}>
                         {item.picked_qty || 0}
                       </span>
-                      
+
                       <Button
                         variant="outline"
                         size="icon"
                         className="w-12 h-12 rounded-xl"
+                        aria-label={`Increase quantity for ${item.style_name} size ${item.size}`}
                         onClick={() => updatePickedQty(item, 1)}
                         disabled={isSaving}
                       >
@@ -408,17 +439,18 @@ export default function RunnerPicking() {
       </div>
 
       {/* Fixed Bottom Button */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-lg">
-        <Button 
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-card border-t border-border shadow-lg">
+        <Button
+          aria-label="Finish store picking"
           onClick={() => {
             const isPartial = runItems.some(i => i.picked_qty > 0 && i.picked_qty < i.target_qty);
             if (isPartial) {
-              const confirmMsg = "Some items are partially picked. Do you want to continue?";
+              const confirmMsg = 'Some items are partially picked. Do you want to continue?';
               if (!window.confirm(confirmMsg)) return;
             }
             setShowComplete(true);
           }}
-          className="w-full h-14 text-lg font-bold bg-teal-600 hover:bg-teal-700"
+          className="w-full h-14 text-lg font-bold"
         >
           <CheckCircle2 className="w-6 h-6 mr-2" />
           Finish Store
@@ -429,7 +461,7 @@ export default function RunnerPicking() {
       <Dialog open={!!showConfirmZero} onOpenChange={cancelHold}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <DialogTitle className="flex items-center gap-2 text-warning">
               <AlertTriangle className="w-6 h-6" />
               Confirm Unavailable
             </DialogTitle>
@@ -438,13 +470,14 @@ export default function RunnerPicking() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <p className="text-center text-gray-600 mb-4">
-              <strong>{showConfirmZero?.style_name}</strong><br />
+            <p className="text-center text-muted-foreground mb-4">
+              <strong className="text-foreground">{showConfirmZero?.style_name}</strong><br />
               Size: {showConfirmZero?.size}
             </p>
             <div className="relative">
-              <Button 
-                className="w-full h-16 bg-amber-500 hover:bg-amber-600"
+              <Button
+                className="w-full h-16 bg-warning hover:bg-warning/90 text-warning-foreground"
+                aria-label="Hold to confirm item unavailable"
                 onMouseDown={() => startHold(showConfirmZero)}
                 onMouseUp={cancelHold}
                 onMouseLeave={cancelHold}
@@ -453,8 +486,8 @@ export default function RunnerPicking() {
               >
                 HOLD TO CONFIRM
               </Button>
-              <div 
-                className="absolute bottom-0 left-0 h-1 bg-amber-700 transition-all duration-100"
+              <div
+                className="absolute bottom-0 left-0 h-1 bg-warning/70 transition-all duration-100"
                 style={{ width: `${holdProgress}%` }}
               />
             </div>
@@ -468,48 +501,48 @@ export default function RunnerPicking() {
           <DialogHeader>
             <DialogTitle>Complete Store</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             {/* Warnings */}
             {unpickedItems.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <p className="font-medium text-amber-800 mb-2">
+              <div className="bg-warning/10 border border-warning/20 rounded-xl p-4">
+                <p className="font-medium text-warning mb-2">
                   <AlertTriangle className="w-4 h-4 inline mr-1" />
                   {unpickedItems.length} items not handled:
                 </p>
-                <ul className="text-sm text-amber-700 space-y-1">
+                <ul className="text-sm text-warning space-y-1">
                   {unpickedItems.slice(0, 5).map(item => (
-                    <li key={item.id}>• {item.style_name} - Size {item.size} ({item.type})</li>
+                    <li key={item.id}>- {item.style_name} - Size {item.size} ({item.type})</li>
                   ))}
                   {unpickedItems.length > 5 && (
-                    <li>• ...and {unpickedItems.length - 5} more</li>
+                    <li>- ...and {unpickedItems.length - 5} more</li>
                   )}
                 </ul>
               </div>
             )}
 
             {/* Summary */}
-            <div className="bg-gray-50 rounded-xl p-4">
+            <div className="bg-muted rounded-xl p-4">
               <div className="flex justify-between">
-                <span className="text-gray-600">Items Handled:</span>
-                <span className="font-bold">{totalPicked} / {totalTarget}</span>
+                <span className="text-muted-foreground">Items Handled:</span>
+                <span className="font-bold text-foreground">{totalPicked} / {totalTarget}</span>
               </div>
             </div>
 
             {/* Receipt Upload */}
             <div>
-              <p className="font-medium text-gray-700 mb-2">Upload Receipt Photo *</p>
-              <input 
+              <p className="font-medium text-foreground mb-2">Upload Receipt Photo *</p>
+              <input
                 type="file"
                 accept="image/jpeg,image/png"
                 onChange={handleImageSelect}
                 ref={fileInputRef}
                 className="hidden"
               />
-              
+
               {receiptPreview ? (
                 <div className="relative">
-                  <img 
+                  <img
                     src={receiptPreview}
                     alt="Receipt"
                     className="w-full h-48 object-cover rounded-xl"
@@ -518,6 +551,7 @@ export default function RunnerPicking() {
                     variant="secondary"
                     size="icon"
                     className="absolute top-2 right-2"
+                    aria-label="Remove receipt image"
                     onClick={() => {
                       setReceiptImage(null);
                       setReceiptPreview(null);
@@ -529,12 +563,13 @@ export default function RunnerPicking() {
               ) : (
                 <Button
                   variant="outline"
-                  className="w-full h-32 border-dashed"
+                  className="w-full h-32 border-dashed border-border"
+                  aria-label="Upload receipt photo"
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <div className="text-center">
-                    <Camera className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                    <span className="text-gray-600">Take Photo or Upload</span>
+                    <Camera className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                    <span className="text-muted-foreground">Take Photo or Upload</span>
                   </div>
                 </Button>
               )}
@@ -542,7 +577,7 @@ export default function RunnerPicking() {
 
             {/* Notes */}
             <div>
-              <p className="font-medium text-gray-700 mb-2">Notes (optional)</p>
+              <p className="font-medium text-foreground mb-2">Notes (optional)</p>
               <Textarea
                 placeholder="Add any notes..."
                 value={notes}
@@ -552,13 +587,13 @@ export default function RunnerPicking() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowComplete(false)}>
+            <Button variant="outline" onClick={() => setShowComplete(false)} aria-label="Cancel store completion">
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={completeStore}
               disabled={isUploading || !receiptImage}
-              className="bg-teal-600 hover:bg-teal-700"
+              aria-label="Confirm and submit store completion"
             >
               {isUploading ? (
                 <>
@@ -583,7 +618,7 @@ export default function RunnerPicking() {
             <DialogTitle>Product Image</DialogTitle>
           </DialogHeader>
           <div className="flex items-center justify-center p-4">
-            <img 
+            <img
               src={viewImage}
               alt="Product"
               className="max-w-full max-h-[70vh] object-contain rounded-lg"

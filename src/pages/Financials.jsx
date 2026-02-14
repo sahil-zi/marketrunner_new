@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import React, { useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { 
-  DollarSign, 
-  Search, 
-  Plus, 
+import { motion } from 'framer-motion';
+import {
+  DollarSign,
+  Plus,
   Store as StoreIcon,
   TrendingUp,
   TrendingDown,
@@ -12,11 +11,11 @@ import {
   Receipt,
   Loader2,
   X,
-  Download
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -48,54 +47,62 @@ import { Calendar as CalendarUI } from '@/components/ui/calendar';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
+import PageHeader from '@/components/admin/PageHeader';
+import EmptyState from '@/components/admin/EmptyState';
+import PaginationBar from '@/components/admin/PaginationBar';
+
+import { useLedger, useCreateLedgerEntry } from '@/hooks/use-ledger';
+import { useStores } from '@/hooks/use-stores';
+import { useAllRunConfirmations } from '@/hooks/use-run-confirmations';
+import { usePagination } from '@/hooks/use-pagination';
+
+const containerVariants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.07 } },
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+};
+
+const fadeIn = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
+};
+
+const DEFAULT_FORM = {
+  store_id: '',
+  transaction_type: 'credit',
+  amount: '',
+  date: new Date().toISOString().split('T')[0],
+  notes: '',
+};
+
 export default function Financials() {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [ledger, setLedger] = useState([]);
-  const [stores, setStores] = useState([]);
-  const [confirmations, setConfirmations] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // --- React Query data ---
+  const { data: ledger = [], isLoading: ledgerLoading } = useLedger();
+  const { data: stores = [] } = useStores();
+  const { data: confirmations = [] } = useAllRunConfirmations();
+
+  const isLoading = ledgerLoading;
+
+  // --- UI state ---
   const [filterStore, setFilterStore] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const [filterDateFrom, setFilterDateFrom] = useState(null);
   const [filterDateTo, setFilterDateTo] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    store_id: '',
-    transaction_type: 'credit',
-    amount: '',
-    date: new Date().toISOString().split('T')[0],
-    notes: '',
-  });
+  const [formData, setFormData] = useState(DEFAULT_FORM);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  // --- Mutations ---
+  const createEntry = useCreateLedgerEntry();
 
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const [ledgerData, storesData, confirmationsData] = await Promise.all([
-        base44.entities.Ledger.list('-created_date'),
-        base44.entities.Store.list(),
-        base44.entities.RunConfirmation.list('-created_date'),
-      ]);
-      setLedger(ledgerData);
-      setStores(storesData);
-      setConfirmations(confirmationsData);
-    } catch (error) {
-      toast.error('Failed to load financial data');
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  // Calculate store balances
-  const storeBalances = React.useMemo(() => {
+  // --- Derived: store balances ---
+  const storeBalances = useMemo(() => {
     const balances = {};
-    
-    stores.forEach(store => {
+
+    stores.forEach((store) => {
       balances[store.id] = {
         storeId: store.id,
         storeName: store.name,
@@ -105,7 +112,7 @@ export default function Financials() {
       };
     });
 
-    ledger.forEach(entry => {
+    ledger.forEach((entry) => {
       const storeId = entry.store_id;
       if (!balances[storeId]) {
         balances[storeId] = {
@@ -116,30 +123,34 @@ export default function Financials() {
           balance: 0,
         };
       }
-      
+
       if (entry.transaction_type === 'debit') {
         balances[storeId].debits += entry.amount || 0;
       } else {
         balances[storeId].credits += entry.amount || 0;
       }
-      balances[storeId].balance = balances[storeId].credits - balances[storeId].debits;
+      balances[storeId].balance =
+        balances[storeId].credits - balances[storeId].debits;
     });
 
-    return Object.values(balances).filter(b => b.debits > 0 || b.credits > 0);
+    return Object.values(balances).filter(
+      (b) => b.debits > 0 || b.credits > 0
+    );
   }, [ledger, stores]);
 
-  // Total balance
   const totalBalance = storeBalances.reduce((sum, b) => sum + b.balance, 0);
 
-  // Filter ledger entries
-  const filteredLedger = React.useMemo(() => {
-    const filtered = ledger.filter(entry => {
-      const matchesStore = filterStore === 'all' || entry.store_id === filterStore;
-      const matchesType = filterType === 'all' || entry.transaction_type === filterType;
-      
+  // --- Derived: filtered ledger ---
+  const filteredLedger = useMemo(() => {
+    return ledger.filter((entry) => {
+      const matchesStore =
+        filterStore === 'all' || entry.store_id === filterStore;
+      const matchesType =
+        filterType === 'all' || entry.transaction_type === filterType;
+
       const entryDate = new Date(entry.date);
       const matchesDateFrom = !filterDateFrom || entryDate >= filterDateFrom;
-      
+
       let matchesDateTo = true;
       if (filterDateTo) {
         const endOfToDate = new Date(filterDateTo);
@@ -149,57 +160,65 @@ export default function Financials() {
 
       return matchesStore && matchesType && matchesDateFrom && matchesDateTo;
     });
-    return filtered;
   }, [ledger, filterStore, filterType, filterDateFrom, filterDateTo]);
 
-  const totalPages = Math.ceil(filteredLedger.length / itemsPerPage);
-  const currentLedger = React.useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return filteredLedger.slice(startIndex, endIndex);
-  }, [filteredLedger, currentPage, itemsPerPage]);
+  // --- Pagination ---
+  const {
+    currentPage,
+    itemsPerPage,
+    totalPages,
+    paginatedItems: currentLedger,
+    setPerPage,
+    goToPage,
+    totalItems,
+  } = usePagination(filteredLedger, 50);
 
-  // Add ledger entry
-  async function addLedgerEntry() {
+  // --- Helpers ---
+  const getConfirmation = (id) => confirmations.find((c) => c.id === id);
+
+  // --- Add entry ---
+  function addLedgerEntry() {
     if (!formData.store_id || !formData.amount) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    setIsSaving(true);
-    try {
-      const store = stores.find(s => s.id === formData.store_id);
-      await base44.entities.Ledger.create({
+    const store = stores.find((s) => s.id === formData.store_id);
+
+    createEntry.mutate(
+      {
         store_id: formData.store_id,
         store_name: store?.name || '',
         transaction_type: formData.transaction_type,
         amount: parseFloat(formData.amount),
         date: formData.date,
         notes: formData.notes,
-      });
-      
-      toast.success('Transaction recorded');
-      setShowAddDialog(false);
-      setFormData({
-        store_id: '',
-        transaction_type: 'credit',
-        amount: '',
-        date: new Date().toISOString().split('T')[0],
-        notes: '',
-      });
-      loadData();
-    } catch (error) {
-      toast.error('Failed to add transaction');
-    } finally {
-      setIsSaving(false);
-    }
+      },
+      {
+        onSuccess: () => {
+          toast.success('Transaction recorded');
+          setShowAddDialog(false);
+          setFormData(DEFAULT_FORM);
+        },
+        onError: () => {
+          toast.error('Failed to add transaction');
+        },
+      }
+    );
   }
 
-  const getConfirmation = (id) => confirmations.find(c => c.id === id);
-
+  // --- CSV export ---
   function exportToCSV() {
-    const headers = ["Date", "Store", "Type", "Amount", "Run #", "Notes", "Receipt URL"];
-    const rows = filteredLedger.map(entry => [
+    const headers = [
+      'Date',
+      'Store',
+      'Type',
+      'Amount',
+      'Run #',
+      'Notes',
+      'Receipt URL',
+    ];
+    const rows = filteredLedger.map((entry) => [
       entry.date,
       entry.store_name,
       entry.transaction_type,
@@ -208,73 +227,104 @@ export default function Financials() {
       (entry.notes || '').replace(/,/g, ';'),
       getConfirmation(entry.run_confirmation_id)?.receipt_image_url || '',
     ]);
-    
+
     const csvContent = [headers, ...rows]
-      .map(e => e.map(cell => `"${cell}"`).join(","))
-      .join("\n");
-    
+      .map((e) => e.map((cell) => `"${cell}"`).join(','))
+      .join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
+    const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `ledger_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute(
+      'download',
+      `ledger_export_${new Date().toISOString().split('T')[0]}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     toast.success('Ledger exported successfully');
   }
 
+  // --- Filtered store balances for the balances tab ---
+  const visibleStoreBalances = storeBalances.filter(
+    (store) => filterStore === 'all' || store.storeId === filterStore
+  );
+
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Financials</h1>
-          <p className="text-gray-500 mt-1">Track store balances and transactions</p>
-        </div>
-        <Button 
-          onClick={() => setShowAddDialog(true)}
-          className="bg-teal-600 hover:bg-teal-700"
-        >
+      <PageHeader
+        title="Financials"
+        subtitle="Track store balances and transactions"
+      >
+        <Button onClick={() => setShowAddDialog(true)}>
           <Plus className="w-4 h-4 mr-2" />
           Add Transaction
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Summary Card */}
-      <Card className={totalBalance >= 0 ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                totalBalance >= 0 ? 'bg-green-100' : 'bg-red-100'
-              }`}>
-                <DollarSign className={`w-6 h-6 ${totalBalance >= 0 ? 'text-green-600' : 'text-red-600'}`} />
+      <motion.div variants={fadeIn} initial="hidden" animate="show">
+        <Card
+          className={cn(
+            'border',
+            totalBalance >= 0
+              ? 'bg-success/10 border-success/20'
+              : 'bg-destructive/10 border-destructive/20'
+          )}
+        >
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div
+                  className={cn(
+                    'w-12 h-12 rounded-xl flex items-center justify-center',
+                    totalBalance >= 0 ? 'bg-success/15' : 'bg-destructive/15'
+                  )}
+                >
+                  <DollarSign
+                    className={cn(
+                      'w-6 h-6',
+                      totalBalance >= 0 ? 'text-success' : 'text-destructive'
+                    )}
+                  />
+                </div>
+                <div>
+                  <p
+                    className={cn(
+                      'text-sm font-medium',
+                      totalBalance >= 0 ? 'text-success' : 'text-destructive'
+                    )}
+                  >
+                    Total Balance
+                  </p>
+                  <p
+                    className={cn(
+                      'text-3xl font-bold',
+                      totalBalance >= 0 ? 'text-success' : 'text-destructive'
+                    )}
+                  >
+                    AED {Math.abs(totalBalance).toFixed(2)}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className={`text-sm font-medium ${totalBalance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                  Total Balance
-                </p>
-                <p className={`text-3xl font-bold ${totalBalance >= 0 ? 'text-green-800' : 'text-red-800'}`}>
-                  AED {Math.abs(totalBalance).toFixed(2)}
-                </p>
+              <div className="text-right">
+                {totalBalance >= 0 ? (
+                  <Badge className="bg-success/15 text-success border-0">
+                    <TrendingUp className="w-3 h-3 mr-1" />
+                    Stores owe you
+                  </Badge>
+                ) : (
+                  <Badge className="bg-destructive/15 text-destructive border-0">
+                    <TrendingDown className="w-3 h-3 mr-1" />
+                    You owe stores
+                  </Badge>
+                )}
               </div>
             </div>
-            <div className="text-right">
-              {totalBalance >= 0 ? (
-                <Badge className="bg-green-100 text-green-700">
-                  <TrendingUp className="w-3 h-3 mr-1" />
-                  Stores owe you
-                </Badge>
-              ) : (
-                <Badge className="bg-red-100 text-red-700">
-                  <TrendingDown className="w-3 h-3 mr-1" />
-                  You owe stores
-                </Badge>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </motion.div>
 
       <Tabs defaultValue="balances" className="space-y-6">
         <TabsList>
@@ -282,9 +332,9 @@ export default function Financials() {
           <TabsTrigger value="ledger">Ledger</TabsTrigger>
         </TabsList>
 
-        {/* Store Balances */}
+        {/* Store Balances Tab */}
         <TabsContent value="balances" className="space-y-6">
-          {/* Store Filter */}
+          {/* Store filter */}
           <Card>
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row gap-4">
@@ -294,8 +344,10 @@ export default function Financials() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Stores</SelectItem>
-                    {stores.map(store => (
-                      <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+                    {stores.map((store) => (
+                      <SelectItem key={store.id} value={store.id}>
+                        {store.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -305,70 +357,102 @@ export default function Financials() {
 
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
             </div>
-          ) : storeBalances.length === 0 ? (
+          ) : visibleStoreBalances.length === 0 ? (
             <Card>
-              <CardContent className="text-center py-12">
-                <StoreIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">No transactions recorded yet</p>
+              <CardContent className="p-0">
+                <EmptyState
+                  icon={StoreIcon}
+                  title="No transactions recorded yet"
+                  description="Add your first transaction to start tracking store balances."
+                />
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {storeBalances
-                .filter(store => filterStore === 'all' || store.storeId === filterStore)
-                .map(store => (
-                <Card key={store.storeId} className={
-                  store.balance > 0 
-                    ? 'border-green-200' 
-                    : store.balance < 0 
-                      ? 'border-red-200' 
-                      : ''
-                }>
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center">
-                          <StoreIcon className="w-5 h-5 text-gray-400" />
+            <motion.div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+              variants={containerVariants}
+              initial="hidden"
+              animate="show"
+            >
+              {visibleStoreBalances.map((store) => (
+                <motion.div key={store.storeId} variants={cardVariants}>
+                  <Card
+                    className={cn(
+                      'bg-card border-border',
+                      store.balance > 0
+                        ? 'border-success/30'
+                        : store.balance < 0
+                          ? 'border-destructive/30'
+                          : ''
+                    )}
+                  >
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-muted rounded-xl flex items-center justify-center">
+                            <StoreIcon className="w-5 h-5 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground">
+                              {store.storeName}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold text-gray-900">{store.storeName}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Total Debits:
+                          </span>
+                          <span className="text-destructive font-medium">
+                            AED {store.debits.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Total Credits:
+                          </span>
+                          <span className="text-success font-medium">
+                            AED {store.credits.toFixed(2)}
+                          </span>
+                        </div>
+                        <hr className="my-2 border-border" />
+                        <div className="flex justify-between">
+                          <span className="font-medium text-muted-foreground">
+                            Balance:
+                          </span>
+                          <span
+                            className={cn(
+                              'text-lg font-bold',
+                              store.balance > 0
+                                ? 'text-success'
+                                : store.balance < 0
+                                  ? 'text-destructive'
+                                  : 'text-muted-foreground'
+                            )}
+                          >
+                            AED {Math.abs(store.balance).toFixed(2)}
+                            {store.balance !== 0 && (
+                              <span className="text-xs ml-1">
+                                {store.balance > 0
+                                  ? '(owed to you)'
+                                  : '(you owe)'}
+                              </span>
+                            )}
+                          </span>
                         </div>
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Total Debits:</span>
-                        <span className="text-red-600 font-medium">AED {store.debits.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Total Credits:</span>
-                        <span className="text-green-600 font-medium">AED {store.credits.toFixed(2)}</span>
-                      </div>
-                      <hr className="my-2" />
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-700">Balance:</span>
-                        <span className={`text-lg font-bold ${
-                          store.balance > 0 ? 'text-green-600' : store.balance < 0 ? 'text-red-600' : 'text-gray-600'
-                        }`}>
-                          AED {Math.abs(store.balance).toFixed(2)}
-                          {store.balance !== 0 && (
-                            <span className="text-xs ml-1">
-                              {store.balance > 0 ? '(owed to you)' : '(you owe)'}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           )}
         </TabsContent>
 
-        {/* Ledger View */}
+        {/* Ledger Tab */}
         <TabsContent value="ledger" className="space-y-6">
           {/* Filters */}
           <Card>
@@ -380,8 +464,10 @@ export default function Financials() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Stores</SelectItem>
-                    {stores.map(store => (
-                      <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+                    {stores.map((store) => (
+                      <SelectItem key={store.id} value={store.id}>
+                        {store.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -395,18 +481,22 @@ export default function Financials() {
                     <SelectItem value="credit">Credits</SelectItem>
                   </SelectContent>
                 </Select>
-                
+
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
-                      variant={"outline"}
+                      variant="outline"
                       className={cn(
-                        "w-full sm:w-[200px] justify-start text-left font-normal",
-                        !filterDateFrom && "text-muted-foreground"
+                        'w-full sm:w-[200px] justify-start text-left font-normal',
+                        !filterDateFrom && 'text-muted-foreground'
                       )}
                     >
                       <Calendar className="mr-2 h-4 w-4" />
-                      {filterDateFrom ? format(filterDateFrom, "PPP") : <span>From Date</span>}
+                      {filterDateFrom ? (
+                        format(filterDateFrom, 'PPP')
+                      ) : (
+                        <span>From Date</span>
+                      )}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -422,14 +512,18 @@ export default function Financials() {
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
-                      variant={"outline"}
+                      variant="outline"
                       className={cn(
-                        "w-full sm:w-[200px] justify-start text-left font-normal",
-                        !filterDateTo && "text-muted-foreground"
+                        'w-full sm:w-[200px] justify-start text-left font-normal',
+                        !filterDateTo && 'text-muted-foreground'
                       )}
                     >
                       <Calendar className="mr-2 h-4 w-4" />
-                      {filterDateTo ? format(filterDateTo, "PPP") : <span>To Date</span>}
+                      {filterDateTo ? (
+                        format(filterDateTo, 'PPP')
+                      ) : (
+                        <span>To Date</span>
+                      )}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -459,12 +553,12 @@ export default function Financials() {
             </CardContent>
           </Card>
 
-          {/* Export Button */}
+          {/* Export */}
           <div className="flex justify-end">
-            <Button 
+            <Button
+              variant="outline"
               onClick={exportToCSV}
               disabled={filteredLedger.length === 0}
-              className="bg-gray-800 hover:bg-gray-900 text-white"
             >
               <Download className="w-4 h-4 mr-2" />
               Export to CSV
@@ -476,13 +570,14 @@ export default function Financials() {
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
                 </div>
               ) : filteredLedger.length === 0 ? (
-                <div className="text-center py-12">
-                  <Receipt className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No transactions found</p>
-                </div>
+                <EmptyState
+                  icon={Receipt}
+                  title="No transactions found"
+                  description="Try adjusting your filters or add a new transaction."
+                />
               ) : (
                 <div>
                   <Table>
@@ -498,23 +593,28 @@ export default function Financials() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {currentLedger.map(entry => {
-                        const confirmation = entry.run_confirmation_id 
+                      {currentLedger.map((entry) => {
+                        const confirmation = entry.run_confirmation_id
                           ? getConfirmation(entry.run_confirmation_id)
                           : null;
-                        
+
                         return (
                           <TableRow key={entry.id}>
                             <TableCell>{entry.date}</TableCell>
                             <TableCell>
-                              <Badge variant="secondary">{entry.store_name}</Badge>
+                              <Badge variant="secondary">
+                                {entry.store_name}
+                              </Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge className={
-                                entry.transaction_type === 'credit'
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-red-100 text-red-700'
-                              }>
+                              <Badge
+                                className={cn(
+                                  'border-0',
+                                  entry.transaction_type === 'credit'
+                                    ? 'bg-success/15 text-success'
+                                    : 'bg-destructive/15 text-destructive'
+                                )}
+                              >
                                 {entry.transaction_type === 'credit' ? (
                                   <TrendingUp className="w-3 h-3 mr-1" />
                                 ) : (
@@ -523,26 +623,47 @@ export default function Financials() {
                                 {entry.transaction_type}
                               </Badge>
                             </TableCell>
-                            <TableCell className={`text-right font-medium ${
-                              entry.transaction_type === 'credit' ? 'text-green-600' : 'text-red-600'
-                            }`}>
+                            <TableCell
+                              className={cn(
+                                'text-right font-medium',
+                                entry.transaction_type === 'credit'
+                                  ? 'text-success'
+                                  : 'text-destructive'
+                              )}
+                            >
                               AED {entry.amount?.toFixed(2)}
                             </TableCell>
                             <TableCell>
-                              {entry.run_number ? `#${entry.run_number}` : '—'}
+                              {entry.run_number
+                                ? `#${entry.run_number}`
+                                : '\u2014'}
                             </TableCell>
                             <TableCell className="max-w-xs truncate">
-                              {entry.notes || '—'}
+                              {entry.notes || '\u2014'}
                             </TableCell>
                             <TableCell>
                               {confirmation?.receipt_image_url ? (
-                                <img
-                                  src={confirmation.receipt_image_url}
-                                  alt="Receipt"
-                                  className="w-10 h-10 object-cover rounded cursor-pointer"
-                                  onClick={() => window.open(confirmation.receipt_image_url, '_blank')}
-                                />
-                              ) : '—'}
+                                <button
+                                  type="button"
+                                  aria-label="View receipt"
+                                  onClick={() =>
+                                    window.open(
+                                      confirmation.receipt_image_url,
+                                      '_blank'
+                                    )
+                                  }
+                                  className="focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
+                                >
+                                  <img
+                                    src={confirmation.receipt_image_url}
+                                    alt="Receipt"
+                                    className="w-10 h-10 object-cover rounded-lg bg-muted"
+                                    loading="lazy"
+                                  />
+                                </button>
+                              ) : (
+                                '\u2014'
+                              )}
                             </TableCell>
                           </TableRow>
                         );
@@ -550,48 +671,15 @@ export default function Financials() {
                     </TableBody>
                   </Table>
 
-                  <div className="flex items-center justify-between p-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700">Transactions per page:</span>
-                      <Select
-                        value={String(itemsPerPage)}
-                        onValueChange={(value) => {
-                          setItemsPerPage(Number(value));
-                          setCurrentPage(1);
-                        }}
-                      >
-                        <SelectTrigger className="w-20">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="25">25</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                          <SelectItem value="100">100</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                        disabled={currentPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-sm text-gray-700">
-                        Page {currentPage} of {totalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                        disabled={currentPage === totalPages}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
+                  <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={goToPage}
+                    onPerPageChange={setPerPage}
+                    itemLabel="transactions"
+                  />
                 </div>
               )}
             </CardContent>
@@ -608,32 +696,42 @@ export default function Financials() {
           <div className="space-y-4 py-4">
             <div>
               <Label htmlFor="store">Store *</Label>
-              <Select 
-                value={formData.store_id} 
-                onValueChange={(v) => setFormData({ ...formData, store_id: v })}
+              <Select
+                value={formData.store_id}
+                onValueChange={(v) =>
+                  setFormData({ ...formData, store_id: v })
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select store" />
                 </SelectTrigger>
                 <SelectContent>
-                  {stores.map(store => (
-                    <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>
+                  {stores.map((store) => (
+                    <SelectItem key={store.id} value={store.id}>
+                      {store.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label htmlFor="type">Transaction Type *</Label>
-              <Select 
-                value={formData.transaction_type} 
-                onValueChange={(v) => setFormData({ ...formData, transaction_type: v })}
+              <Select
+                value={formData.transaction_type}
+                onValueChange={(v) =>
+                  setFormData({ ...formData, transaction_type: v })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="credit">Credit (Payment to Store)</SelectItem>
-                  <SelectItem value="debit">Debit (Charge from Store)</SelectItem>
+                  <SelectItem value="credit">
+                    Credit (Payment to Store)
+                  </SelectItem>
+                  <SelectItem value="debit">
+                    Debit (Charge from Store)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -644,7 +742,9 @@ export default function Financials() {
                 type="number"
                 step="0.01"
                 value={formData.amount}
-                onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, amount: e.target.value })
+                }
                 placeholder="0.00"
               />
             </div>
@@ -654,7 +754,9 @@ export default function Financials() {
                 id="date"
                 type="date"
                 value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, date: e.target.value })
+                }
               />
             </div>
             <div>
@@ -662,21 +764,27 @@ export default function Financials() {
               <Textarea
                 id="notes"
                 value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, notes: e.target.value })
+                }
                 placeholder="Add notes about this transaction..."
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowAddDialog(false)}
+            >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={addLedgerEntry}
-              disabled={isSaving}
-              className="bg-teal-600 hover:bg-teal-700"
+              disabled={createEntry.isPending}
             >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              {createEntry.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
               Add Transaction
             </Button>
           </DialogFooter>

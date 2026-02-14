@@ -1,14 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { 
-  Truck, 
-  Plus, 
-  Clock, 
-  CheckCircle2, 
+import { useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
+import {
+  Truck,
+  Plus,
   AlertCircle,
-  ArrowRight,
   Loader2,
   Package,
   Store,
@@ -18,11 +17,10 @@ import {
   X,
   CheckSquare,
   Square,
-  Download
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -39,75 +37,81 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+
+import PageHeader from '@/components/admin/PageHeader';
+import StatusBadge from '@/components/admin/StatusBadge';
+import EmptyState from '@/components/admin/EmptyState';
 import OrderSelector from '@/components/admin/OrderSelector';
 import LabelPrinter from '@/components/admin/LabelPrinter';
 
+import { useRuns, useUpdateRun, useCancelRuns } from '@/hooks/use-runs';
+import { usePendingOrderItems } from '@/hooks/use-orders';
+import { usePendingReturns } from '@/hooks/use-returns';
+import { useProducts } from '@/hooks/use-products';
+import { useStores } from '@/hooks/use-stores';
+import { useUsers } from '@/hooks/use-users';
+import { usePagination } from '@/hooks/use-pagination';
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 12 },
+  visible: (i) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.04, duration: 0.3, ease: 'easeOut' },
+  }),
+};
+
 export default function Runs() {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [runs, setRuns] = useState([]);
-  const [pendingOrderItems, setPendingOrderItems] = useState([]);
-  const [pendingReturnItems, setPendingReturnItems] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [stores, setStores] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const queryClient = useQueryClient();
+
+  // ---- React Query data hooks ----
+  const { data: runs = [], isLoading } = useRuns('-created_date');
+  const { data: pendingOrderItems = [] } = usePendingOrderItems();
+  const { data: pendingReturnItems = [] } = usePendingReturns();
+  const { data: products = [] } = useProducts();
+  const { data: stores = [] } = useStores();
+  const { data: users = [] } = useUsers();
+
+  // ---- Mutations ----
+  const updateRun = useUpdateRun();
+  const cancelRunsMutation = useCancelRuns();
+
+  // ---- Pagination ----
+  const {
+    currentPage,
+    itemsPerPage,
+    totalPages,
+    paginatedItems: paginatedRuns,
+    setPerPage,
+    nextPage,
+    prevPage,
+    hasPrevPage,
+    hasNextPage,
+  } = usePagination(runs, 50);
+
+  // ---- UI state only ----
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [assignDialog, setAssignDialog] = useState(null);
   const [selectedRunner, setSelectedRunner] = useState('');
   const [selectedPickupItems, setSelectedPickupItems] = useState([]);
   const [selectedReturnItems, setSelectedReturnItems] = useState([]);
-  const [runItemsCache, setRunItemsCache] = useState({});
   const [selectedRuns, setSelectedRuns] = useState([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [runItemsCache, setRunItemsCache] = useState({});
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const [runsData, pendingOrderItemsData, pendingReturnItemsData, productsData, storesData, usersData] = await Promise.all([
-        base44.entities.Run.list('-created_date'),
-        base44.entities.OrderItem.filter({ status: 'pending' }),
-        base44.entities.Return.filter({ status: 'pending' }),
-        base44.entities.ProductCatalog.list(),
-        base44.entities.Store.list(),
-        base44.entities.User.list(),
-      ]);
-      setRuns(runsData);
-      setPendingOrderItems(pendingOrderItemsData);
-      setPendingReturnItems(pendingReturnItemsData);
-      setProducts(productsData);
-      setStores(storesData);
-      setUsers(usersData);
-    } catch (error) {
-      toast.error('Failed to load data');
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  // Load run items for a specific run
-  async function loadRunItems(runId) {
-    if (runItemsCache[runId]) return runItemsCache[runId];
-    
-    const items = await base44.entities.RunItem.filter({ run_id: runId });
-    setRunItemsCache(prev => ({ ...prev, [runId]: items }));
-    return items;
-  }
+  // ---- Derived ----
+  const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
 
   // Calculate pending items summary
-  const pendingStats = React.useMemo(() => {
-    const productMap = new Map(products.map(p => [p.barcode, p]));
+  const pendingStats = useMemo(() => {
+    const productMap = new Map(products.map((p) => [p.barcode, p]));
     const storeItems = {};
     let totalQty = 0;
     const uniqueStyles = new Set();
 
-    pendingOrderItems.forEach(item => {
+    pendingOrderItems.forEach((item) => {
       const product = productMap.get(item.barcode);
       if (product) {
         const storeId = product.store_id || 'unknown';
@@ -118,7 +122,7 @@ export default function Runs() {
       }
     });
 
-    pendingReturnItems.forEach(item => {
+    pendingReturnItems.forEach((item) => {
       const storeId = item.store_id || 'unknown';
       if (!storeItems[storeId]) storeItems[storeId] = 0;
       totalQty += item.quantity || 1;
@@ -134,11 +138,20 @@ export default function Runs() {
     };
   }, [pendingOrderItems, pendingReturnItems, products]);
 
-  // Generate new run
+  // ---- Load run items (cached) ----
+  async function loadRunItems(runId) {
+    if (runItemsCache[runId]) return runItemsCache[runId];
+
+    const items = await base44.entities.RunItem.filter({ run_id: runId });
+    setRunItemsCache((prev) => ({ ...prev, [runId]: items }));
+    return items;
+  }
+
+  // ---- Generate new run ----
   async function generateRun() {
     const pickupItemsToUse = selectedPickupItems.length > 0 ? selectedPickupItems : pendingOrderItems;
     const returnItemsToUse = selectedReturnItems.length > 0 ? selectedReturnItems : pendingReturnItems;
-    
+
     if (pickupItemsToUse.length === 0 && returnItemsToUse.length === 0) {
       toast.error('No items selected');
       return;
@@ -146,12 +159,12 @@ export default function Runs() {
 
     setIsGenerating(true);
     try {
-      const productMap = new Map(products.map(p => [p.barcode, p]));
-      const storeMap = new Map(stores.map(s => [s.id, s.name]));
+      const productMap = new Map(products.map((p) => [p.barcode, p]));
+      const storeMap = new Map(stores.map((s) => [s.id, s.name]));
 
       // Aggregate pickup items by barcode and store
       const aggregatedPickupItems = {};
-      pickupItemsToUse.forEach(item => {
+      pickupItemsToUse.forEach((item) => {
         const product = productMap.get(item.barcode);
         const storeId = product?.store_id || 'unknown';
         const key = `${storeId}-${item.barcode}`;
@@ -169,7 +182,7 @@ export default function Runs() {
 
       // Aggregate return items by barcode and store
       const aggregatedReturnItems = {};
-      returnItemsToUse.forEach(item => {
+      returnItemsToUse.forEach((item) => {
         const key = `${item.store_id}-${item.barcode}`;
         if (!aggregatedReturnItems[key]) {
           aggregatedReturnItems[key] = {
@@ -195,7 +208,7 @@ export default function Runs() {
       let totalPickupItems = 0;
       let totalReturnItems = 0;
 
-      Object.values(aggregatedPickupItems).forEach(item => {
+      Object.values(aggregatedPickupItems).forEach((item) => {
         const product = productMap.get(item.barcode);
         if (product) {
           uniqueStyles.add(product.style_name);
@@ -204,7 +217,7 @@ export default function Runs() {
         totalPickupItems += item.totalQty;
       });
 
-      Object.values(aggregatedReturnItems).forEach(item => {
+      Object.values(aggregatedReturnItems).forEach((item) => {
         uniqueStyles.add(item.style_name);
         if (item.store_id) uniqueStores.add(item.store_id);
         totalReturnItems += item.totalQty;
@@ -281,11 +294,18 @@ export default function Runs() {
 
       await base44.entities.RunItem.bulkCreate(runItemsToCreate);
 
-      toast.success(`Run #${runNumber} created with ${totalPickupItems} pickups and ${totalReturnItems} returns`);
+      toast.success(
+        `Run #${runNumber} created with ${totalPickupItems} pickups and ${totalReturnItems} returns`
+      );
       setShowGenerateDialog(false);
       setSelectedPickupItems([]);
       setSelectedReturnItems([]);
-      loadData();
+
+      // Refresh all relevant queries
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+      queryClient.invalidateQueries({ queryKey: ['returns'] });
+      queryClient.invalidateQueries({ queryKey: ['runItems'] });
     } catch (error) {
       toast.error('Failed to generate run');
       console.error(error);
@@ -294,7 +314,7 @@ export default function Runs() {
     }
   }
 
-  // Assign runner to run
+  // ---- Assign runner ----
   async function assignRunner(runId) {
     if (!selectedRunner) {
       toast.error('Please select a runner');
@@ -302,46 +322,46 @@ export default function Runs() {
     }
 
     try {
-      const runner = users.find(u => u.id === selectedRunner);
-      await base44.entities.Run.update(runId, {
-        runner_id: selectedRunner,
-        runner_name: runner?.full_name || runner?.email || '',
+      const runner = users.find((u) => u.id === selectedRunner);
+      await updateRun.mutateAsync({
+        id: runId,
+        data: {
+          runner_id: selectedRunner,
+          runner_name: runner?.full_name || runner?.email || '',
+        },
       });
       toast.success('Runner assigned');
       setAssignDialog(null);
       setSelectedRunner('');
-      loadData();
     } catch (error) {
       toast.error('Failed to assign runner');
     }
   }
 
-  // Activate run
+  // ---- Activate run ----
   async function activateRun(runId) {
     try {
-      await base44.entities.Run.update(runId, { status: 'active' });
+      await updateRun.mutateAsync({ id: runId, data: { status: 'active' } });
       toast.success('Run activated');
-      loadData();
     } catch (error) {
       toast.error('Failed to activate run');
     }
   }
 
-  // Print labels for a run
+  // ---- Print labels ----
   async function printRunLabels(runId) {
     const items = await loadRunItems(runId);
     if (items.length === 0) {
       toast.error('No items in this run');
       return;
     }
-    
-    // Use the LabelPrinter component logic
+
     const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
     const zpl = generateZPL(items);
     await printToZebra(zpl);
   }
 
-  // Export run to PDF
+  // ---- Export PDF ----
   async function exportRunPDF(runId) {
     try {
       toast.loading('Generating PDF...');
@@ -350,7 +370,7 @@ export default function Runs() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const run = runs.find(r => r.id === runId);
+      const run = runs.find((r) => r.id === runId);
       a.download = `run-${run?.run_number || runId}-stores.pdf`;
       document.body.appendChild(a);
       a.click();
@@ -365,15 +385,15 @@ export default function Runs() {
     }
   }
 
-  // Cancel runs
+  // ---- Cancel runs ----
   async function cancelRuns() {
     setIsCancelling(true);
     try {
-      const { data } = await base44.functions.invoke('cancelRuns', { runIds: selectedRuns });
-      
-      const completed = data.results.filter(r => r.status === 'completed').length;
-      const cancelled = data.results.filter(r => r.status === 'cancelled').length;
-      
+      const { data } = await cancelRunsMutation.mutateAsync(selectedRuns);
+
+      const completed = data.results.filter((r) => r.status === 'completed').length;
+      const cancelled = data.results.filter((r) => r.status === 'cancelled').length;
+
       if (completed > 0 && cancelled > 0) {
         toast.success(`${completed} run(s) completed with picked items, ${cancelled} fully cancelled`);
       } else if (completed > 0) {
@@ -381,10 +401,9 @@ export default function Runs() {
       } else {
         toast.success(`${cancelled} run(s) cancelled`);
       }
-      
+
       setShowCancelDialog(false);
       setSelectedRuns([]);
-      loadData();
     } catch (error) {
       toast.error('Failed to cancel runs');
       console.error(error);
@@ -393,76 +412,55 @@ export default function Runs() {
     }
   }
 
-  // Toggle run selection
+  // ---- Toggle run selection ----
   function toggleRunSelection(runId) {
-    setSelectedRuns(prev => 
-      prev.includes(runId) ? prev.filter(id => id !== runId) : [...prev, runId]
+    setSelectedRuns((prev) =>
+      prev.includes(runId) ? prev.filter((id) => id !== runId) : [...prev, runId]
     );
   }
 
-  const statusConfig = {
-    draft: { icon: Clock, color: 'bg-gray-100 text-gray-700', label: 'Draft' },
-    active: { icon: Truck, color: 'bg-amber-100 text-amber-700', label: 'Active' },
-    completed: { icon: CheckCircle2, color: 'bg-green-100 text-green-700', label: 'Completed' },
-    dropped_off: { icon: CheckCircle2, color: 'bg-teal-100 text-teal-700', label: 'Dropped Off' },
-    cancelled: { icon: X, color: 'bg-red-100 text-red-700', label: 'Cancelled' },
-  };
-
-  const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
-
+  // ---- Render ----
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Runs</h1>
-          <p className="text-gray-500 mt-1">Consolidate orders & returns for pickup runs</p>
-        </div>
-        <div className="flex gap-2">
-          {selectedRuns.length > 0 && (
-            <Button 
-              variant="outline"
-              onClick={() => setShowCancelDialog(true)}
-              className="text-red-600 hover:text-red-700 border-red-200"
-            >
-              <X className="w-4 h-4 mr-2" />
-              Cancel {selectedRuns.length} Run{selectedRuns.length !== 1 ? 's' : ''}
-            </Button>
-          )}
-          <Button 
-            onClick={() => setShowGenerateDialog(true)}
-            disabled={!hasPendingItems}
-            className="bg-teal-600 hover:bg-teal-700"
+      <PageHeader title="Runs" subtitle="Consolidate orders & returns for pickup runs">
+        {selectedRuns.length > 0 && (
+          <Button
+            variant="outline"
+            onClick={() => setShowCancelDialog(true)}
+            className="text-destructive border-destructive/30 hover:bg-destructive/10"
           >
-            <Plus className="w-4 h-4 mr-2" />
-            Generate New Run
+            <X className="w-4 h-4 mr-2" />
+            Cancel {selectedRuns.length} Run{selectedRuns.length !== 1 ? 's' : ''}
           </Button>
-        </div>
-      </div>
+        )}
+        <Button onClick={() => setShowGenerateDialog(true)} disabled={!hasPendingItems}>
+          <Plus className="w-4 h-4 mr-2" />
+          Generate New Run
+        </Button>
+      </PageHeader>
 
       {/* Pending Summary */}
       {hasPendingItems && (
-        <Card className="border-teal-200 bg-teal-50">
+        <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center">
-                  <AlertCircle className="w-6 h-6 text-teal-600" />
+                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <p className="font-semibold text-teal-900">Pending Items Ready for Consolidation</p>
-                  <p className="text-sm text-teal-700">
-                    {pendingStats.totalItems} items • {pendingStats.uniqueStyles} styles • {pendingStats.storeCount} stores
-                    {pendingStats.returns > 0 && ` • ${pendingStats.returns} returns`}
+                  <p className="font-semibold text-foreground">
+                    Pending Items Ready for Consolidation
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {pendingStats.totalItems} items &middot; {pendingStats.uniqueStyles} styles
+                    &middot; {pendingStats.storeCount} stores
+                    {pendingStats.returns > 0 && ` \u00B7 ${pendingStats.returns} returns`}
                   </p>
                 </div>
               </div>
-              <Button 
-                onClick={() => setShowGenerateDialog(true)}
-                className="bg-teal-600 hover:bg-teal-700"
-              >
-                Generate Run
-              </Button>
+              <Button onClick={() => setShowGenerateDialog(true)}>Generate Run</Button>
             </div>
           </CardContent>
         </Card>
@@ -471,31 +469,30 @@ export default function Runs() {
       {/* Runs Grid */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
         </div>
       ) : runs.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <Truck className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500 mb-4">No runs created yet</p>
-            {hasPendingItems && (
-              <Button 
-                onClick={() => setShowGenerateDialog(true)}
-                className="bg-teal-600 hover:bg-teal-700"
-              >
-                Generate First Run
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Truck}
+          title="No runs created yet"
+          description="Generate a run to consolidate pending order items and returns for pickup."
+          action={
+            hasPendingItems ? (
+              <Button onClick={() => setShowGenerateDialog(true)}>Generate First Run</Button>
+            ) : null
+          }
+        />
       ) : (
         <div className="grid gap-4">
-          {runs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map(run => {
-            const status = statusConfig[run.status] || statusConfig.draft;
-            const StatusIcon = status.icon;
-
-            return (
-              <Card key={run.id} className="hover:shadow-md transition-shadow">
+          {paginatedRuns.map((run, index) => (
+            <motion.div
+              key={run.id}
+              custom={index}
+              initial="hidden"
+              animate="visible"
+              variants={cardVariants}
+            >
+              <Card className="bg-card border-border hover:shadow-glow-sm transition-shadow">
                 <CardContent className="p-6">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
@@ -504,29 +501,35 @@ export default function Runs() {
                         size="icon"
                         onClick={() => toggleRunSelection(run.id)}
                         className="shrink-0"
+                        aria-label={
+                          selectedRuns.includes(run.id)
+                            ? `Deselect run ${run.run_number}`
+                            : `Select run ${run.run_number}`
+                        }
                       >
                         {selectedRuns.includes(run.id) ? (
-                          <CheckSquare className="w-5 h-5 text-teal-600" />
+                          <CheckSquare className="w-5 h-5 text-primary" />
                         ) : (
-                          <Square className="w-5 h-5 text-gray-400" />
+                          <Square className="w-5 h-5 text-muted-foreground" />
                         )}
                       </Button>
-                      <div className="w-14 h-14 bg-gray-50 rounded-xl flex items-center justify-center">
-                        <Truck className="w-7 h-7 text-gray-400" />
+                      <div className="w-14 h-14 bg-muted rounded-xl flex items-center justify-center">
+                        <Truck className="w-7 h-7 text-muted-foreground" />
                       </div>
                       <div>
-                        <div className="flex items-center gap-3">
-                          <h3 className="text-lg font-bold text-gray-900">Run #{run.run_number}</h3>
-                          <Badge className={status.color}>
-                            <StatusIcon className="w-3 h-3 mr-1" />
-                            {status.label}
-                          </Badge>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <h3 className="text-lg font-bold text-foreground">
+                            Run #{run.run_number}
+                          </h3>
+                          <StatusBadge status={run.status} />
                           {run.has_returns && (
-                            <Badge className="bg-purple-100 text-purple-700">Has Returns</Badge>
+                            <span className="inline-flex items-center rounded-md border border-purple-500/20 bg-purple-500/15 px-2.5 py-0.5 text-xs font-semibold text-purple-400">
+                              Has Returns
+                            </span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">{run.date}</p>
-                        <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                        <p className="text-sm text-muted-foreground mt-1">{run.date}</p>
+                        <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Package className="w-4 h-4" />
                             {run.total_items || 0} items
@@ -536,19 +539,20 @@ export default function Runs() {
                             {run.total_stores || 0} stores
                           </span>
                           {run.runner_name && (
-                            <span className="text-teal-600 font-medium">
-                              → {run.runner_name}
+                            <span className="text-primary font-medium">
+                              &rarr; {run.runner_name}
                             </span>
                           )}
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => exportRunPDF(run.id)}
+                        aria-label={`Export run ${run.run_number} as PDF`}
                       >
                         <Download className="w-4 h-4 mr-2" />
                         Export PDF
@@ -557,6 +561,7 @@ export default function Runs() {
                         variant="outline"
                         size="sm"
                         onClick={() => printRunLabels(run.id)}
+                        aria-label={`Print labels for run ${run.run_number}`}
                       >
                         <Printer className="w-4 h-4 mr-2" />
                         Print Labels
@@ -570,18 +575,14 @@ export default function Runs() {
                           >
                             {run.runner_id ? 'Reassign' : 'Assign Runner'}
                           </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => activateRun(run.id)}
-                            className="bg-teal-600 hover:bg-teal-700"
-                          >
+                          <Button size="sm" onClick={() => activateRun(run.id)}>
                             <Play className="w-4 h-4 mr-2" />
                             Activate
                           </Button>
                         </>
                       )}
                       <Link to={createPageUrl(`RunDetails?id=${run.id}`)}>
-                        <Button variant="outline" size="sm">
+                        <Button variant="outline" size="sm" aria-label={`View run ${run.run_number}`}>
                           <Eye className="w-4 h-4 mr-2" />
                           View
                         </Button>
@@ -590,53 +591,43 @@ export default function Runs() {
                   </div>
                 </CardContent>
               </Card>
-            );
-          })}
+            </motion.div>
+          ))}
         </div>
       )}
 
-      <div className="flex items-center justify-between p-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-700">Runs per page:</span>
-          <Select
-            value={String(itemsPerPage)}
-            onValueChange={(value) => {
-              setItemsPerPage(Number(value));
-              setCurrentPage(1);
-            }}
-          >
-            <SelectTrigger className="w-20">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="25">25</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-              <SelectItem value="100">100</SelectItem>
-            </SelectContent>
-          </Select>
+      {/* Pagination */}
+      {runs.length > 0 && (
+        <div className="flex items-center justify-between p-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Runs per page:</span>
+            <Select
+              value={String(itemsPerPage)}
+              onValueChange={(value) => setPerPage(Number(value))}
+            >
+              <SelectTrigger className="w-20">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={prevPage} disabled={!hasPrevPage}>
+              Previous
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button variant="outline" size="sm" onClick={nextPage} disabled={!hasNextPage}>
+              Next
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-          >
-            Previous
-          </Button>
-          <span className="text-sm text-gray-700">
-            Page {currentPage} of {Math.ceil(runs.length / itemsPerPage)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(runs.length / itemsPerPage)))}
-            disabled={currentPage === Math.ceil(runs.length / itemsPerPage)}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
+      )}
 
       {/* Generate Run Dialog */}
       <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
@@ -650,7 +641,9 @@ export default function Runs() {
           <div className="py-4 space-y-6">
             {pendingOrderItems.length > 0 && (
               <>
-                <h3 className="text-lg font-semibold text-gray-900">Pickup Items ({pendingOrderItems.length})</h3>
+                <h3 className="text-lg font-semibold text-foreground">
+                  Pickup Items ({pendingOrderItems.length})
+                </h3>
                 <OrderSelector
                   orderItems={pendingOrderItems}
                   products={products}
@@ -662,7 +655,9 @@ export default function Runs() {
             )}
             {pendingReturnItems.length > 0 && (
               <>
-                <h3 className="text-lg font-semibold text-gray-900 mt-6">Return Items ({pendingReturnItems.length})</h3>
+                <h3 className="text-lg font-semibold text-foreground mt-6">
+                  Return Items ({pendingReturnItems.length})
+                </h3>
                 <OrderSelector
                   orderItems={pendingReturnItems}
                   products={products}
@@ -674,25 +669,27 @@ export default function Runs() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setShowGenerateDialog(false);
-              setSelectedPickupItems([]);
-              setSelectedReturnItems([]);
-            }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowGenerateDialog(false);
+                setSelectedPickupItems([]);
+                setSelectedReturnItems([]);
+              }}
+            >
               Cancel
             </Button>
-            <Button 
-              onClick={generateRun}
-              disabled={isGenerating}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
+            <Button onClick={generateRun} disabled={isGenerating}>
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Generating...
                 </>
               ) : (
-                `Generate Run (${(selectedPickupItems.length || pendingOrderItems.length) + (selectedReturnItems.length || pendingReturnItems.length)} items)`
+                `Generate Run (${
+                  (selectedPickupItems.length || pendingOrderItems.length) +
+                  (selectedReturnItems.length || pendingReturnItems.length)
+                } items)`
               )}
             </Button>
           </DialogFooter>
@@ -711,7 +708,7 @@ export default function Runs() {
                 <SelectValue placeholder="Select a runner" />
               </SelectTrigger>
               <SelectContent>
-                {users.map(user => (
+                {users.map((user) => (
                   <SelectItem key={user.id} value={user.id}>
                     {user.full_name || user.email}
                   </SelectItem>
@@ -723,12 +720,7 @@ export default function Runs() {
             <Button variant="outline" onClick={() => setAssignDialog(null)}>
               Cancel
             </Button>
-            <Button 
-              onClick={() => assignRunner(assignDialog.id)}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
-              Assign
-            </Button>
+            <Button onClick={() => assignRunner(assignDialog.id)}>Assign</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -737,20 +729,19 @@ export default function Runs() {
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel {selectedRuns.length} Run{selectedRuns.length !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogTitle>
+              Cancel {selectedRuns.length} Run{selectedRuns.length !== 1 ? 's' : ''}?
+            </DialogTitle>
             <DialogDescription>
-              Runs with picked items will be marked as completed. Unpicked items will revert to pending status.
+              Runs with picked items will be marked as completed. Unpicked items will revert to
+              pending status.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
               Cancel
             </Button>
-            <Button 
-              onClick={cancelRuns}
-              disabled={isCancelling}
-              className="bg-red-600 hover:bg-red-700"
-            >
+            <Button variant="destructive" onClick={cancelRuns} disabled={isCancelling}>
               {isCancelling ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

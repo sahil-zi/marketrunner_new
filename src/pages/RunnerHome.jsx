@@ -1,93 +1,110 @@
-import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { 
-  Truck, 
-  Clock, 
-  CheckCircle2, 
+import { motion } from 'framer-motion';
+import {
+  Truck,
   Package,
   Store,
   ArrowRight,
   Loader2,
-  RefreshCw
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import StatusBadge from '@/components/admin/StatusBadge';
+import EmptyState from '@/components/admin/EmptyState';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import { useRuns, useAllRunItems, useUpdateRun } from '@/hooks/use-runs';
+import { useAllRunConfirmations } from '@/hooks/use-run-confirmations';
 
+const container = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08 },
+  },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } },
+};
 
 export default function RunnerHome() {
-  const [user, setUser] = useState(null);
-  const [runs, setRuns] = useState([]);
-  const [runItems, setRunItems] = useState([]);
-  const [confirmations, setConfirmations] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: user, isLoading: userLoading } = useCurrentUser();
+  const { data: allRuns = [], isLoading: runsLoading, refetch: refetchRuns } = useRuns();
+  const { data: allRunItems = [], isLoading: itemsLoading, refetch: refetchItems } = useAllRunItems();
+  const { data: allConfirmations = [], isLoading: confirmationsLoading, refetch: refetchConfirmations } = useAllConfirmations();
+  const updateRun = useUpdateRun();
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const isLoading = userLoading || runsLoading || itemsLoading || confirmationsLoading;
 
-  async function loadData() {
-    setIsLoading(true);
-    try {
-      const currentUser = await base44.auth.me();
-      setUser(currentUser);
-
-      const [runsData, runItemsData, confirmationsData] = await Promise.all([
-        base44.entities.Run.list(),
-        base44.entities.RunItem.list(),
-        base44.entities.RunConfirmation.list(),
-      ]);
-
-      // Filter runs for this runner that are active or recently completed
-      const myRuns = runsData.filter(r => {
-        const isAssignedToMe = !r.runner_id || r.runner_id === currentUser.id;
-        const isActiveOrRecent = r.status === 'active' || 
-          (r.status === 'completed' && r.completed_at && 
-           new Date() - new Date(r.completed_at) < 24 * 60 * 60 * 1000);
-        return isAssignedToMe && isActiveOrRecent;
-      });
-
-      setRuns(myRuns);
-      setRunItems(runItemsData);
-      setConfirmations(confirmationsData);
-    } catch (error) {
-      console.error('Failed to load runs');
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  // Filter runs for this runner that are active or recently completed
+  const runs = useMemo(() => {
+    if (!user || !allRuns.length) return [];
+    return allRuns.filter((r) => {
+      const isAssignedToMe = !r.runner_id || r.runner_id === user.id;
+      const isActiveOrRecent =
+        r.status === 'active' ||
+        (r.status === 'completed' &&
+          r.completed_at &&
+          Date.now() - new Date(r.completed_at).getTime() < 24 * 60 * 60 * 1000);
+      return isAssignedToMe && isActiveOrRecent;
+    });
+  }, [allRuns, user]);
 
   // Calculate run progress
   const getRunProgress = (runId, run) => {
-    const items = runItems.filter(i => i.run_id === runId);
-    const runConfirmations = confirmations.filter(c => c.run_id === runId);
-    
-    const uniqueStores = [...new Set(items.map(i => i.store_id).filter(Boolean))];
-    const confirmedStoreIds = new Set(runConfirmations.map(c => c.store_id));
-    const completedStores = uniqueStores.filter(sid => confirmedStoreIds.has(sid)).length;
-    
+    const items = allRunItems.filter((i) => i.run_id === runId);
+    const runConfirmations = allConfirmations.filter((c) => c.run_id === runId);
+
+    const uniqueStores = [...new Set(items.map((i) => i.store_id).filter(Boolean))];
+    const confirmedStoreIds = new Set(runConfirmations.map((c) => c.store_id));
+    const completedStores = uniqueStores.filter((sid) => confirmedStoreIds.has(sid)).length;
+
     const totalUnits = items.reduce((sum, i) => sum + (i.target_qty || 0), 0);
     const pickedUnits = items.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
-    
+
     return {
       totalStores: uniqueStores.length,
-      completedStores: completedStores,
+      completedStores,
       totalUnits,
       pickedUnits,
-      percentage: uniqueStores.length > 0 
-        ? Math.round((completedStores / uniqueStores.length) * 100) 
-        : 0,
-      isComplete: run.status === 'completed' || run.status === 'dropped_off' || (completedStores === uniqueStores.length && uniqueStores.length > 0),
+      percentage:
+        uniqueStores.length > 0 ? Math.round((completedStores / uniqueStores.length) * 100) : 0,
+      isComplete:
+        run.status === 'completed' ||
+        run.status === 'dropped_off' ||
+        (completedStores === uniqueStores.length && uniqueStores.length > 0),
     };
+  };
+
+  const handleRefresh = () => {
+    refetchRuns();
+    refetchItems();
+    refetchConfirmations();
+  };
+
+  const handleMarkDroppedOff = async (e, run) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await updateRun.mutateAsync({
+        id: run.id,
+        data: { status: 'dropped_off', completed_at: new Date().toISOString() },
+      });
+      toast.success('Run marked as dropped off');
+    } catch {
+      toast.error('Failed to update run');
+    }
   };
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-10 h-10 text-teal-600 animate-spin" />
+        <Loader2 className="w-10 h-10 text-primary animate-spin" />
       </div>
     );
   }
@@ -96,19 +113,15 @@ export default function RunnerHome() {
     <div className="p-4 space-y-6">
       {/* Welcome */}
       <div className="text-center py-4">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Hello, {user?.full_name?.split(' ')[0] || 'Runner'}! 👋
+        <h1 className="text-2xl font-bold text-foreground">
+          Hello, {user?.full_name?.split(' ')[0] || 'Runner'}!
         </h1>
-        <p className="text-gray-500 mt-1">Select a run to continue picking</p>
+        <p className="text-muted-foreground mt-1">Select a run to continue picking</p>
       </div>
 
       {/* Refresh Button */}
       <div className="flex justify-center">
-        <Button 
-          variant="outline" 
-          onClick={loadData}
-          className="gap-2"
-        >
+        <Button variant="outline" onClick={handleRefresh} className="gap-2" aria-label="Refresh runs">
           <RefreshCw className="w-4 h-4" />
           Refresh
         </Button>
@@ -116,130 +129,123 @@ export default function RunnerHome() {
 
       {/* Active Runs */}
       {runs.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-16">
-            <Truck className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-700 mb-2">No Active Runs</h3>
-            <p className="text-gray-500">Check back later for new runs</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Truck}
+          title="No Active Runs"
+          description="Check back later for new runs"
+        />
       ) : (
-        <div className="space-y-4">
-          {runs.map(run => {
+        <motion.div
+          className="space-y-4"
+          variants={container}
+          initial="hidden"
+          animate="show"
+        >
+          {runs.map((run) => {
             const progress = getRunProgress(run.id, run);
             const isComplete = progress.isComplete;
 
             return (
-              <Link 
-                key={run.id}
-                to={createPageUrl(`RunnerPickStore?runId=${run.id}`)}
-              >
-                <Card className={`transition-all active:scale-[0.98] ${
-                  isComplete ? 'border-green-300 bg-green-50' : 'hover:border-teal-300'
-                }`}>
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
-                          isComplete ? 'bg-green-100' : 'bg-teal-100'
-                        }`}>
-                          <Truck className={`w-7 h-7 ${
-                            isComplete ? 'text-green-600' : 'text-teal-600'
-                          }`} />
+              <motion.div key={run.id} variants={item}>
+                <Link to={createPageUrl(`RunnerPickStore?runId=${run.id}`)}>
+                  <Card
+                    className={`transition-all active:scale-[0.98] bg-card border-border ${
+                      isComplete
+                        ? 'border-success/30 bg-success/5'
+                        : 'hover:border-primary/40'
+                    }`}
+                  >
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
+                              isComplete ? 'bg-success/10' : 'bg-primary/10'
+                            }`}
+                          >
+                            <Truck
+                              className={`w-7 h-7 ${
+                                isComplete ? 'text-success' : 'text-primary'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <h2 className="text-2xl font-bold text-foreground">
+                              Run #{run.run_number}
+                            </h2>
+                            <p className="text-muted-foreground">{run.date}</p>
+                          </div>
                         </div>
-                        <div>
-                          <h2 className="text-2xl font-bold text-gray-900">
-                            Run #{run.run_number}
-                          </h2>
-                          <p className="text-gray-500">{run.date}</p>
+                        <ArrowRight className="w-6 h-6 text-muted-foreground mt-2" />
+                      </div>
+
+                      {/* Progress */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Store className="w-5 h-5" />
+                              <span className="font-medium">
+                                {progress.completedStores} / {progress.totalStores} Stores
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                              <Package className="w-4 h-4" />
+                              <span className="font-medium">
+                                {progress.pickedUnits} / {progress.totalUnits} Units Picked
+                              </span>
+                            </div>
+                          </div>
+                          {isComplete ? (
+                            <StatusBadge status="completed" />
+                          ) : (
+                            <StatusBadge status="active" />
+                          )}
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
+                          <motion.div
+                            className={`h-full rounded-full ${
+                              isComplete ? 'bg-success' : 'bg-primary'
+                            }`}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${progress.percentage}%` }}
+                            transition={{ duration: 0.6, ease: 'easeOut' }}
+                          />
                         </div>
                       </div>
-                      <ArrowRight className="w-6 h-6 text-gray-400 mt-2" />
-                    </div>
 
-                    {/* Progress */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 text-gray-600">
-                            <Store className="w-5 h-5" />
-                            <span className="font-medium">
-                              {progress.completedStores} / {progress.totalStores} Stores
-                            </span>
+                      {/* Stats & Actions */}
+                      <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Package className="w-5 h-5" />
+                            <span>{run.total_items || 0} items</span>
                           </div>
-                          <div className="flex items-center gap-2 text-gray-600 text-sm">
-                            <Package className="w-4 h-4" />
-                            <span className="font-medium">
-                              {progress.pickedUnits} / {progress.totalUnits} Units Picked
-                            </span>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Store className="w-5 h-5" />
+                            <span>{run.total_stores || 0} stores</span>
                           </div>
                         </div>
-                        {isComplete ? (
-                          <Badge className="bg-green-100 text-green-700 text-sm px-3 py-1">
-                            <CheckCircle2 className="w-4 h-4 mr-1" />
-                            Complete
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-amber-100 text-amber-700 text-sm px-3 py-1">
-                            <Clock className="w-4 h-4 mr-1" />
-                            In Progress
-                          </Badge>
+                        {isComplete && run.status !== 'dropped_off' && (
+                          <Button
+                            size="sm"
+                            onClick={(e) => handleMarkDroppedOff(e, run)}
+                            disabled={updateRun.isPending}
+                          >
+                            Mark Dropped Off
+                          </Button>
+                        )}
+                        {run.status === 'dropped_off' && (
+                          <StatusBadge status="dropped_off" />
                         )}
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-300 ${isComplete ? 'bg-green-500' : 'bg-teal-600'}`}
-                          style={{ width: `${progress.percentage}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Stats & Actions */}
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
-                      <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-2 text-gray-600">
-                          <Package className="w-5 h-5" />
-                          <span>{run.total_items || 0} items</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-gray-600">
-                          <Store className="w-5 h-5" />
-                          <span>{run.total_stores || 0} stores</span>
-                        </div>
-                      </div>
-                      {isComplete && run.status !== 'dropped_off' && (
-                        <Button
-                          size="sm"
-                          className="bg-green-600 hover:bg-green-700"
-                          onClick={async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            try {
-                              await base44.entities.Run.update(run.id, { 
-                                status: 'dropped_off',
-                                completed_at: new Date().toISOString()
-                              });
-                              loadData();
-                              toast.success('Run marked as dropped off');
-                            } catch (error) {
-                              toast.error('Failed to update run');
-                            }
-                          }}
-                        >
-                          Mark Dropped Off
-                        </Button>
-                      )}
-                      {run.status === 'dropped_off' && (
-                        <Badge className="bg-purple-100 text-purple-700">
-                          Dropped Off
-                        </Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </motion.div>
             );
           })}
-        </div>
+        </motion.div>
       )}
     </div>
   );
