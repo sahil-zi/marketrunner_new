@@ -43,7 +43,7 @@ import PageHeader from '@/components/admin/PageHeader';
 import StatusBadge from '@/components/admin/StatusBadge';
 import EmptyState from '@/components/admin/EmptyState';
 import OrderSelector from '@/components/admin/OrderSelector';
-import LabelPrinter from '@/components/admin/LabelPrinter';
+import LabelPrinter, { generateZPL, downloadZPLFile } from '@/components/admin/LabelPrinter';
 
 import { useRuns, useUpdateRun, useCancelRuns } from '@/hooks/use-runs';
 import { usePendingOrderItems } from '@/hooks/use-orders';
@@ -101,6 +101,7 @@ export default function Runs() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [runItemsCache, setRunItemsCache] = useState({});
+  const [successDialog, setSuccessDialog] = useState(null); // { runNumber, items }
 
   // ---- Derived ----
   const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
@@ -148,7 +149,9 @@ export default function Runs() {
     return items;
   }
 
-  // ---- Generate new run ----
+  const RUN_ITEM_LIMIT = 500;
+
+  // ---- Generate new run(s) — auto-splits into chunks of 500 items ----
   async function generateRun() {
     const pickupItemsToUse = selectedPickupItems.length > 0 ? selectedPickupItems : pendingOrderItems;
     const returnItemsToUse = selectedReturnItems.length > 0 ? selectedReturnItems : pendingReturnItems;
@@ -164,29 +167,32 @@ export default function Runs() {
       const storeMap = new Map(stores.map((s) => [s.id, s.name]));
 
       // Aggregate pickup items by barcode and store
-      const aggregatedPickupItems = {};
+      const aggregatedPickups = [];
+      const pickupMap = {};
       pickupItemsToUse.forEach((item) => {
         const product = productMap.get(item.barcode);
         const storeId = product?.store_id || 'unknown';
         const key = `${storeId}-${item.barcode}`;
-        if (!aggregatedPickupItems[key]) {
-          aggregatedPickupItems[key] = {
+        if (!pickupMap[key]) {
+          pickupMap[key] = {
             barcode: item.barcode,
             totalQty: 0,
             orderItemIds: [],
             store_id: storeId,
           };
+          aggregatedPickups.push(pickupMap[key]);
         }
-        aggregatedPickupItems[key].totalQty += item.quantity || 1;
-        aggregatedPickupItems[key].orderItemIds.push(item.id);
+        pickupMap[key].totalQty += item.quantity || 1;
+        pickupMap[key].orderItemIds.push(item.id);
       });
 
       // Aggregate return items by barcode and store
-      const aggregatedReturnItems = {};
+      const aggregatedReturns = [];
+      const returnMap = {};
       returnItemsToUse.forEach((item) => {
         const key = `${item.store_id}-${item.barcode}`;
-        if (!aggregatedReturnItems[key]) {
-          aggregatedReturnItems[key] = {
+        if (!returnMap[key]) {
+          returnMap[key] = {
             barcode: item.barcode,
             totalQty: 0,
             returnItemIds: [],
@@ -194,113 +200,141 @@ export default function Runs() {
             store_name: item.store_name,
             style_name: item.style_name,
           };
+          aggregatedReturns.push(returnMap[key]);
         }
-        aggregatedReturnItems[key].totalQty += item.quantity || 1;
-        aggregatedReturnItems[key].returnItemIds.push(item.id);
+        returnMap[key].totalQty += item.quantity || 1;
+        returnMap[key].returnItemIds.push(item.id);
       });
 
-      // Get next run number
-      const maxRunNumber = runs.reduce((max, r) => Math.max(max, r.run_number || 0), 0);
-      const runNumber = maxRunNumber + 1;
+      // Combine all aggregated items into one list with type tag
+      const allAggregated = [
+        ...aggregatedPickups.map((item) => ({ ...item, _type: 'pickup' })),
+        ...aggregatedReturns.map((item) => ({ ...item, _type: 'return' })),
+      ];
 
-      // Calculate stats
-      const uniqueStyles = new Set();
-      const uniqueStores = new Set();
-      let totalPickupItems = 0;
-      let totalReturnItems = 0;
-
-      Object.values(aggregatedPickupItems).forEach((item) => {
-        const product = productMap.get(item.barcode);
-        if (product) {
-          uniqueStyles.add(product.style_name);
-          if (product.store_id) uniqueStores.add(product.store_id);
-        }
-        totalPickupItems += item.totalQty;
-      });
-
-      Object.values(aggregatedReturnItems).forEach((item) => {
-        uniqueStyles.add(item.style_name);
-        if (item.store_id) uniqueStores.add(item.store_id);
-        totalReturnItems += item.totalQty;
-      });
-
-      // Create run
-      const run = await createOne('runs', {
-        run_number: runNumber,
-        date: new Date().toISOString().split('T')[0],
-        status: 'draft',
-        total_styles: uniqueStyles.size,
-        total_items: totalPickupItems + totalReturnItems,
-        total_stores: uniqueStores.size,
-        has_returns: totalReturnItems > 0,
-      });
-
-      const runItemsToCreate = [];
-
-      // Create run items for pickups
-      for (const item of Object.values(aggregatedPickupItems)) {
-        const product = productMap.get(item.barcode);
-        runItemsToCreate.push({
-          run_id: run.id,
-          barcode: item.barcode,
-          style_name: product?.style_name || '',
-          size: product?.size || '',
-          color: product?.color || '',
-          image_url: product?.image_url || '',
-          cost_price: product?.cost_price || 0,
-          store_id: item.store_id,
-          store_name: item.store_id ? storeMap.get(item.store_id) || '' : '',
-          target_qty: item.totalQty,
-          picked_qty: 0,
-          status: 'pending',
-          type: 'pickup',
-        });
-
-        for (const orderItemId of item.orderItemIds) {
-          await updateOne('order_items', orderItemId, {
-            status: 'assigned_to_run',
-            run_id: run.id,
-          });
-        }
+      // Split into chunks of RUN_ITEM_LIMIT
+      const chunks = [];
+      for (let i = 0; i < allAggregated.length; i += RUN_ITEM_LIMIT) {
+        chunks.push(allAggregated.slice(i, i + RUN_ITEM_LIMIT));
       }
 
-      // Create run items for returns
-      for (const item of Object.values(aggregatedReturnItems)) {
-        const product = productMap.get(item.barcode);
-        runItemsToCreate.push({
-          run_id: run.id,
-          barcode: item.barcode,
-          style_name: item.style_name || product?.style_name || '',
-          size: product?.size || '',
-          color: product?.color || '',
-          image_url: product?.image_url || '',
-          cost_price: product?.cost_price || 0,
-          store_id: item.store_id,
-          store_name: item.store_name || storeMap.get(item.store_id) || '',
-          target_qty: item.totalQty,
-          picked_qty: 0,
-          status: 'pending',
-          type: 'return',
-          original_return_id: item.returnItemIds[0],
+      let baseRunNumber = runs.reduce((max, r) => Math.max(max, r.run_number || 0), 0);
+      const createdRuns = [];
+      let allRunItems = [];
+
+      for (const chunk of chunks) {
+        baseRunNumber += 1;
+        const runNumber = baseRunNumber;
+
+        // Calculate stats for this chunk
+        const uniqueStyles = new Set();
+        const uniqueStores = new Set();
+        let chunkPickups = 0;
+        let chunkReturns = 0;
+        let hasReturns = false;
+
+        chunk.forEach((item) => {
+          const product = productMap.get(item.barcode);
+          if (product) uniqueStyles.add(product.style_name);
+          if (item.style_name) uniqueStyles.add(item.style_name);
+          const sid = item.store_id;
+          if (sid && sid !== 'unknown') uniqueStores.add(sid);
+
+          if (item._type === 'pickup') chunkPickups += item.totalQty;
+          else { chunkReturns += item.totalQty; hasReturns = true; }
         });
 
-        for (const returnItemId of item.returnItemIds) {
-          await updateOne('returns', returnItemId, {
-            status: 'assigned_to_run',
-            run_id: run.id,
-            run_number: runNumber,
-          });
+        // Create run
+        const run = await createOne('runs', {
+          run_number: runNumber,
+          date: new Date().toISOString().split('T')[0],
+          status: 'draft',
+          total_styles: uniqueStyles.size,
+          total_items: chunkPickups + chunkReturns,
+          total_stores: uniqueStores.size,
+          has_returns: hasReturns,
+        });
+
+        const runItemsToCreate = [];
+
+        for (const item of chunk) {
+          const product = productMap.get(item.barcode);
+
+          if (item._type === 'pickup') {
+            runItemsToCreate.push({
+              run_id: run.id,
+              barcode: item.barcode,
+              style_name: product?.style_name || '',
+              size: product?.size || '',
+              color: product?.color || '',
+              image_url: product?.image_url || '',
+              cost_price: product?.cost_price || 0,
+              store_id: item.store_id,
+              store_name: item.store_id ? storeMap.get(item.store_id) || '' : '',
+              target_qty: item.totalQty,
+              picked_qty: 0,
+              status: 'pending',
+              type: 'pickup',
+            });
+
+            for (const orderItemId of item.orderItemIds) {
+              await updateOne('order_items', orderItemId, {
+                status: 'assigned_to_run',
+                run_id: run.id,
+              });
+            }
+          } else {
+            runItemsToCreate.push({
+              run_id: run.id,
+              barcode: item.barcode,
+              style_name: item.style_name || product?.style_name || '',
+              size: product?.size || '',
+              color: product?.color || '',
+              image_url: product?.image_url || '',
+              cost_price: product?.cost_price || 0,
+              store_id: item.store_id,
+              store_name: item.store_name || storeMap.get(item.store_id) || '',
+              target_qty: item.totalQty,
+              picked_qty: 0,
+              status: 'pending',
+              type: 'return',
+              original_return_id: item.returnItemIds[0],
+            });
+
+            for (const returnItemId of item.returnItemIds) {
+              await updateOne('returns', returnItemId, {
+                status: 'assigned_to_run',
+                run_id: run.id,
+                run_number: runNumber,
+              });
+            }
+          }
         }
+
+        await bulkInsert('run_items', runItemsToCreate);
+        createdRuns.push({ runNumber, pickups: chunkPickups, returns: chunkReturns });
+        allRunItems = allRunItems.concat(runItemsToCreate);
       }
 
-      await bulkInsert('run_items', runItemsToCreate);
+      if (createdRuns.length === 1) {
+        const r = createdRuns[0];
+        toast.success(`Run #${r.runNumber} created with ${r.pickups} pickups and ${r.returns} returns`);
+      } else {
+        toast.success(`${createdRuns.length} runs created (#${createdRuns[0].runNumber}–#${createdRuns[createdRuns.length - 1].runNumber}) with ${allAggregated.length} total items`);
+      }
 
-      toast.success(
-        `Run #${runNumber} created with ${totalPickupItems} pickups and ${totalReturnItems} returns`
-      );
       setShowGenerateDialog(false);
       setSelectedPickupItems([]);
       setSelectedReturnItems([]);
+      setSuccessDialog({
+        runNumber: createdRuns.length === 1
+          ? createdRuns[0].runNumber
+          : `${createdRuns[0].runNumber}–${createdRuns[createdRuns.length - 1].runNumber}`,
+        items: allRunItems,
+        totalPickups: createdRuns.reduce((s, r) => s + r.pickups, 0),
+        totalReturns: createdRuns.reduce((s, r) => s + r.returns, 0),
+        runCount: createdRuns.length,
+      });
 
       // Refresh all relevant queries
       queryClient.invalidateQueries({ queryKey: ['runs'] });
@@ -360,6 +394,18 @@ export default function Runs() {
     const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
     const zpl = generateZPL(items);
     await printToZebra(zpl);
+  }
+
+  // ---- Export ZPL ----
+  async function exportRunZPL(runId) {
+    const items = await loadRunItems(runId);
+    if (items.length === 0) {
+      toast.error('No items in this run');
+      return;
+    }
+    const run = runs.find((r) => r.id === runId);
+    const zpl = generateZPL(items);
+    downloadZPLFile(zpl, `run_${run?.run_number || runId}_labels.zpl`);
   }
 
   // ---- Export PDF ----
@@ -567,6 +613,15 @@ export default function Runs() {
                         <Printer className="w-4 h-4 mr-2" />
                         Print Labels
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => exportRunZPL(run.id)}
+                        aria-label={`Export ZPL for run ${run.run_number}`}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Export ZPL
+                      </Button>
                       {run.status === 'draft' && (
                         <>
                           <Button
@@ -722,6 +777,53 @@ export default function Runs() {
               Cancel
             </Button>
             <Button onClick={() => assignRunner(assignDialog.id)}>Assign</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Run Created Success Dialog */}
+      <Dialog open={!!successDialog} onOpenChange={() => setSuccessDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {successDialog?.runCount > 1
+                ? `Runs #${successDialog?.runNumber} Created`
+                : `Run #${successDialog?.runNumber} Created`}
+            </DialogTitle>
+            <DialogDescription>
+              {successDialog?.runCount > 1 && `${successDialog.runCount} runs created. `}
+              {successDialog?.totalPickups || 0} pickups and {successDialog?.totalReturns || 0} returns.
+              Print or export labels for the run items.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (successDialog?.items) {
+                  const zpl = generateZPL(successDialog.items);
+                  downloadZPLFile(zpl, `run_${successDialog.runNumber}_labels.zpl`);
+                }
+              }}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export ZPL
+            </Button>
+            <Button
+              onClick={async () => {
+                if (successDialog?.items) {
+                  const { printToZebra } = await import('@/components/admin/LabelPrinter');
+                  const zpl = generateZPL(successDialog.items);
+                  await printToZebra(zpl);
+                }
+              }}
+            >
+              <Printer className="w-4 h-4 mr-2" />
+              Print Labels
+            </Button>
+            <Button variant="ghost" onClick={() => setSuccessDialog(null)}>
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

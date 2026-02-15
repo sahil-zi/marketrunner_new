@@ -25,6 +25,63 @@ Deno.serve(async (req) => {
     const { runIds } = await req.json();
     const results = [];
 
+    // Helper: revert order/return items back to pending for a given run item
+    async function revertRunItem(runId: string, item: any) {
+      if (item.type === "pickup") {
+        // Find order items assigned to this run with matching barcode
+        const { data: orderItems } = await supabase
+          .from("order_items")
+          .select("*")
+          .eq("run_id", runId)
+          .eq("barcode", item.barcode);
+
+        for (const oi of orderItems || []) {
+          await supabase
+            .from("order_items")
+            .update({ status: "pending", run_id: null })
+            .eq("id", oi.id);
+        }
+
+        // Also try filtering by status in case run_id filter doesn't match
+        if (!orderItems || orderItems.length === 0) {
+          const { data: byStatus } = await supabase
+            .from("order_items")
+            .select("*")
+            .eq("status", "assigned_to_run")
+            .eq("barcode", item.barcode);
+
+          for (const oi of byStatus || []) {
+            await supabase
+              .from("order_items")
+              .update({ status: "pending", run_id: null })
+              .eq("id", oi.id);
+          }
+        }
+      } else if (item.type === "return") {
+        // Revert return items back to pending
+        if (item.original_return_id) {
+          await supabase
+            .from("returns")
+            .update({ status: "pending", run_id: null, run_number: null })
+            .eq("id", item.original_return_id);
+        } else {
+          // Fallback: find returns assigned to this run with matching barcode
+          const { data: returns } = await supabase
+            .from("returns")
+            .select("*")
+            .eq("run_id", runId)
+            .eq("barcode", item.barcode);
+
+          for (const ret of returns || []) {
+            await supabase
+              .from("returns")
+              .update({ status: "pending", run_id: null, run_number: null })
+              .eq("id", ret.id);
+          }
+        }
+      }
+    }
+
     for (const runId of runIds) {
       // Get run items
       const { data: runItems } = await supabase
@@ -35,44 +92,39 @@ Deno.serve(async (req) => {
       const pickedItems = (runItems || []).filter((i) => (i.picked_qty || 0) > 0);
       const unpickedItems = (runItems || []).filter((i) => (i.picked_qty || 0) === 0);
 
-      // Revert unpicked order items to pending
-      for (const item of unpickedItems) {
-        if (item.type === "pickup") {
-          const { data: orderItems } = await supabase
-            .from("order_items")
-            .select("*")
-            .eq("barcode", item.barcode)
-            .eq("run_id", runId);
+      if (pickedItems.length > 0) {
+        // Has picked items: mark run as completed, revert unpicked
+        await supabase
+          .from("runs")
+          .update({ status: "completed", completed_at: new Date().toISOString() })
+          .eq("id", runId);
 
-          for (const oi of orderItems || []) {
-            await supabase
-              .from("order_items")
-              .update({ status: "pending", run_id: null })
-              .eq("id", oi.id);
-          }
-        } else if (item.type === "return" && item.original_return_id) {
+        for (const item of unpickedItems) {
+          await revertRunItem(runId, item);
           await supabase
-            .from("returns")
-            .update({ status: "pending", run_id: null, run_number: null })
-            .eq("id", item.original_return_id);
+            .from("run_items")
+            .update({ status: "cancelled" })
+            .eq("id", item.id);
         }
 
-        // Mark run item as cancelled
+        results.push({ runId, status: "completed", pickedCount: pickedItems.length, revertedCount: unpickedItems.length });
+      } else {
+        // No picked items: cancel entire run
         await supabase
-          .from("run_items")
+          .from("runs")
           .update({ status: "cancelled" })
-          .eq("id", item.id);
+          .eq("id", runId);
+
+        for (const item of runItems || []) {
+          await revertRunItem(runId, item);
+          await supabase
+            .from("run_items")
+            .update({ status: "cancelled" })
+            .eq("id", item.id);
+        }
+
+        results.push({ runId, status: "cancelled", revertedCount: (runItems || []).length });
       }
-
-      // Determine final run status
-      const finalStatus = pickedItems.length > 0 ? "completed" : "cancelled";
-
-      await supabase
-        .from("runs")
-        .update({ status: finalStatus })
-        .eq("id", runId);
-
-      results.push({ runId, status: finalStatus });
     }
 
     return new Response(JSON.stringify({ results }), {

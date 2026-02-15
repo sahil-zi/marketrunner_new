@@ -107,10 +107,14 @@ export default function CSVUploader({
     }
   };
 
+  const fileInputRef = React.useRef(null);
+
   const reset = () => {
     setFile(null);
     setParsedData(null);
     setValidationResult(null);
+    // Reset the file input so re-selecting the same file triggers onChange
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -130,6 +134,7 @@ export default function CSVUploader({
         {!file && (
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-teal-300 transition-colors">
             <input
+              ref={fileInputRef}
               type="file"
               accept=".csv"
               onChange={handleFileChange}
@@ -204,6 +209,14 @@ export default function CSVUploader({
                   </ul>
                 </AlertDescription>
               </Alert>
+            )}
+
+            {/* Remove & retry button on errors */}
+            {validationResult.errors?.length > 0 && (
+              <Button variant="outline" onClick={reset} className="w-full">
+                <X className="w-4 h-4 mr-2" />
+                Remove file & try again
+              </Button>
             )}
 
             {/* Warnings */}

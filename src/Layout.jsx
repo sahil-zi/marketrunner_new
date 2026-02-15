@@ -32,6 +32,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 const adminNavItems = [
   { name: 'Dashboard', icon: LayoutDashboard, page: 'Dashboard' },
   { name: 'Inventory', icon: Package, page: 'Inventory' },
+  { name: 'Print Labels', icon: Printer, page: 'PrintLabels' },
   { name: 'Orders', icon: ShoppingCart, page: 'Orders' },
   { name: 'Returns', icon: PackageX, page: 'Returns' },
   { name: 'Runs', icon: Truck, page: 'Runs' },
@@ -89,12 +90,12 @@ export default function Layout({ children, currentPageName }) {
     return (
       <div className="min-h-screen bg-background">
         <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
-          <div className="flex items-center gap-3">
+          <Link to={createPageUrl('Dashboard')} className="flex items-center gap-3">
             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
               <Truck className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="font-bold text-xl text-foreground">MarketRunner</span>
-          </div>
+          </Link>
           <div className="flex items-center gap-3">
             {isOnline ? (
               <div className="flex items-center gap-1.5 text-success text-sm font-medium">
@@ -155,7 +156,7 @@ export default function Layout({ children, currentPageName }) {
           "flex items-center h-16 px-4 border-b border-border/30",
           sidebarExpanded ? "justify-between" : "justify-center"
         )}>
-          <div className="flex items-center gap-3 min-w-0">
+          <Link to={createPageUrl('Dashboard')} className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shrink-0">
               <Truck className="w-4 h-4 text-primary-foreground" />
             </div>
@@ -168,7 +169,7 @@ export default function Layout({ children, currentPageName }) {
                 MarketRunner
               </motion.span>
             )}
-          </div>
+          </Link>
           {sidebarExpanded && (
             <Button
               variant="ghost"
@@ -265,12 +266,12 @@ export default function Layout({ children, currentPageName }) {
 
       {/* Mobile Header */}
       <header className="lg:hidden bg-card border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-3">
+        <Link to={createPageUrl('Dashboard')} className="flex items-center gap-3">
           <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
             <Truck className="w-4 h-4 text-primary-foreground" />
           </div>
           <span className="font-bold text-lg text-foreground">MarketRunner</span>
-        </div>
+        </Link>
         <div className="flex items-center gap-2">
           {user && (
             <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">

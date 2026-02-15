@@ -9,6 +9,7 @@ import {
   Truck,
   ArrowLeft,
   Printer,
+  Download,
   Package,
   Store,
   CheckCircle2,
@@ -91,41 +92,26 @@ export default function RunDetails() {
     };
   }, [runItems, confirmations, itemsByStore]);
 
-  // Print labels
-  function printLabels() {
-    toast.info('Generating PDF labels...');
+  // Print labels via ZPL
+  async function printLabels() {
+    if (runItems.length === 0) {
+      toast.error('No items to print');
+      return;
+    }
+    const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
+    const zpl = generateZPL(runItems);
+    await printToZebra(zpl);
+  }
 
-    const sortedItems = [...runItems].sort((a, b) => {
-      if (a.store_name !== b.store_name) {
-        return (a.store_name || '').localeCompare(b.store_name || '');
-      }
-      return (a.style_name || '').localeCompare(b.style_name || '');
-    });
-
-    const labelContent = sortedItems
-      .map(
-        (item) => `
-=================================
-${item.type === 'return' ? 'RETURN' : 'PICKUP'}
-BARCODE: ${item.barcode}
-Style: ${item.style_name}
-Size: ${item.size || 'N/A'}  |  Qty: ${item.target_qty}
-Store: ${item.store_name}
-Run: #${run.run_number}
-=================================
-    `
-      )
-      .join('\n');
-
-    const blob = new Blob([labelContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Run_${run.run_number}_Labels.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    toast.success('Labels downloaded');
+  // Export ZPL file
+  async function exportZPL() {
+    if (runItems.length === 0) {
+      toast.error('No items to export');
+      return;
+    }
+    const { generateZPL, downloadZPLFile } = await import('@/components/admin/LabelPrinter');
+    const zpl = generateZPL(runItems);
+    downloadZPLFile(zpl, `run_${run?.run_number || runId}_labels.zpl`);
   }
 
   // --- Loading state ---
@@ -176,10 +162,16 @@ Run: #${run.run_number}
             <p className="text-muted-foreground mt-1">{run.date}</p>
           </div>
         </div>
-        <Button onClick={printLabels}>
-          <Printer className="w-4 h-4 mr-2" />
-          Print Labels
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={printLabels}>
+            <Printer className="w-4 h-4 mr-2" />
+            Print Labels
+          </Button>
+          <Button variant="outline" onClick={exportZPL}>
+            <Download className="w-4 h-4 mr-2" />
+            Export ZPL
+          </Button>
+        </div>
       </div>
 
       {/* ---- Progress Card ---- */}

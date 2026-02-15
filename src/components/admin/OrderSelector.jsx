@@ -61,7 +61,7 @@ export default function OrderSelector({
   const filteredGroups = groupedItems.filter(group => {
     const matchesSearch = group.styleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       group.store?.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStore = selectedStoreIds.length === 0 || selectedStoreIds.includes(group.store?.id);
+    const matchesStore = selectedStoreIds.length === 0 || !group.store?.id || selectedStoreIds.includes(group.store.id);
     return matchesSearch && matchesStore;
   });
 
@@ -95,6 +95,24 @@ export default function OrderSelector({
   const selectedCount = selectedItems.length;
   const totalCount = enrichedItems.length;
 
+  const allFilteredItems = filteredGroups.flatMap(g => g.items);
+  const allFilteredSelected = allFilteredItems.length > 0 && allFilteredItems.every(item =>
+    selectedItems.some(si => si.id === item.id)
+  );
+
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      // Deselect all filtered items
+      const filteredIds = new Set(allFilteredItems.map(i => i.id));
+      onSelectionChange(selectedItems.filter(si => !filteredIds.has(si.id)));
+    } else {
+      // Select all filtered items
+      const alreadySelectedIds = new Set(selectedItems.map(si => si.id));
+      const newItems = allFilteredItems.filter(item => !alreadySelectedIds.has(item.id));
+      onSelectionChange([...selectedItems, ...newItems]);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Search & Store Filter */}
@@ -118,11 +136,16 @@ export default function OrderSelector({
         />
       </div>
 
-      {/* Summary */}
+      {/* Summary + Select All */}
       <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600">Selected Items:</span>
-          <span className="font-bold text-teal-700">{selectedCount} / {totalCount}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600">Selected Items:</span>
+            <span className="font-bold text-teal-700">{selectedCount} / {totalCount}</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={toggleAll}>
+            {allFilteredSelected ? 'Deselect All' : 'Select All'}
+          </Button>
         </div>
       </div>
 
@@ -149,14 +172,23 @@ export default function OrderSelector({
                     )}
                   </div>
                   {group.imageUrl && (
-                    <img 
-                      src={group.imageUrl}
-                      alt={group.styleName}
-                      className="w-16 h-16 object-cover rounded-lg"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={group.imageUrl}
+                        alt={group.styleName}
+                        className="w-16 h-16 object-cover rounded-lg"
+                      />
+                    </div>
                   )}
                   <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900">{group.styleName}</h4>
+                    <h4 className="font-semibold text-gray-900">
+                      {group.styleName}
+                      {group.items[0]?.barcode && (
+                        <span className="ml-2 text-xs font-normal text-gray-500">
+                          {group.items[0].barcode}
+                        </span>
+                      )}
+                    </h4>
                     <div className="flex items-center gap-2 mt-1">
                       {group.store && (
                         <Badge variant="secondary" className="text-xs">

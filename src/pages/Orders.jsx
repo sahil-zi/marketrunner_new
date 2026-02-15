@@ -339,15 +339,19 @@ export default function Orders() {
     toast.success('Orders exported');
   }
 
-  /* ---- Cancel order item ---------------------------------------- */
-  function cancelOrderItem(orderItemId, reason) {
-    updateOrderItem.mutate(
-      { id: orderItemId, data: { status: 'cancelled', notes: `Cancelled: ${reason}` } },
-      {
-        onSuccess: () => toast.success('Order item cancelled'),
-        onError: () => toast.error('Failed to cancel order item'),
+  /* ---- Cancel order items --------------------------------------- */
+  async function cancelOrderItems(items, reason) {
+    try {
+      for (const item of items) {
+        await updateOrderItem.mutateAsync({
+          id: item.id,
+          data: { status: 'cancelled', notes: `Cancelled: ${reason}` },
+        });
       }
-    );
+      toast.success(`${items.length} item${items.length !== 1 ? 's' : ''} cancelled`);
+    } catch {
+      toast.error('Failed to cancel order items');
+    }
   }
 
   /* ---- Mark as Shipped (updates inventory too) ------------------ */
@@ -573,26 +577,24 @@ export default function Orders() {
                                     <>
                                       <DropdownMenuItem
                                         className="text-destructive focus:text-destructive"
-                                        onClick={() => {
-                                          order.items
-                                            .filter((i) => i.status === 'pending')
-                                            .forEach((item) =>
-                                              cancelOrderItem(item.id, 'oos')
-                                            );
-                                        }}
+                                        onClick={() =>
+                                          cancelOrderItems(
+                                            order.items.filter((i) => i.status === 'pending'),
+                                            'oos'
+                                          )
+                                        }
                                       >
                                         <XCircle className="mr-2 h-4 w-4" />
                                         Cancel (Out of Stock)
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
                                         className="text-destructive focus:text-destructive"
-                                        onClick={() => {
-                                          order.items
-                                            .filter((i) => i.status === 'pending')
-                                            .forEach((item) =>
-                                              cancelOrderItem(item.id, 'qc_fail')
-                                            );
-                                        }}
+                                        onClick={() =>
+                                          cancelOrderItems(
+                                            order.items.filter((i) => i.status === 'pending'),
+                                            'qc_fail'
+                                          )
+                                        }
                                       >
                                         <XCircle className="mr-2 h-4 w-4" />
                                         Cancel (QC Fail)

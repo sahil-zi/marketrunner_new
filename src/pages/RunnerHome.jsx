@@ -36,7 +36,7 @@ export default function RunnerHome() {
   const { data: user, isLoading: userLoading } = useCurrentUser();
   const { data: allRuns = [], isLoading: runsLoading, refetch: refetchRuns } = useRuns();
   const { data: allRunItems = [], isLoading: itemsLoading, refetch: refetchItems } = useAllRunItems();
-  const { data: allConfirmations = [], isLoading: confirmationsLoading, refetch: refetchConfirmations } = useAllConfirmations();
+  const { data: allConfirmations = [], isLoading: confirmationsLoading, refetch: refetchConfirmations } = useAllRunConfirmations();
   const updateRun = useUpdateRun();
 
   const isLoading = userLoading || runsLoading || itemsLoading || confirmationsLoading;
