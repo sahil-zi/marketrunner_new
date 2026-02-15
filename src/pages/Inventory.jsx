@@ -54,6 +54,14 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import CSVUploader from '@/components/admin/CSVUploader';
 import LabelPrinter from '@/components/admin/LabelPrinter';
@@ -103,6 +111,8 @@ export default function Inventory() {
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [selectedProducts, setSelectedProducts] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Get unique categories from products
   const categories = [...new Set(products.map((p) => p.category).filter(Boolean))];
@@ -346,6 +356,25 @@ export default function Inventory() {
       }
       setIsDialogOpen(false);
       setEditingProduct(null);
+    } catch (error) {
+      toast.error('Failed to save product');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // Save product from detail sheet (always an update)
+  async function saveProductFromSheet(productData) {
+    if (productData.store_id && !stores.find((s) => s.id === productData.store_id)) {
+      toast.error('Selected store does not exist');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await updateProduct.mutateAsync({ id: selectedProduct.id, data: productData });
+      toast.success('Product updated');
+      setIsEditing(false);
+      setSelectedProduct((prev) => ({ ...prev, ...productData }));
     } catch (error) {
       toast.error('Failed to save product');
     } finally {
@@ -625,12 +654,16 @@ export default function Inventory() {
                     </TableHeader>
                     <TableBody>
                       {paginatedItems.map((product) => (
-                        <TableRow key={product.id}>
+                        <TableRow
+                          key={product.id}
+                          className="cursor-pointer"
+                          onClick={() => { setSelectedProduct(product); setIsEditing(false); }}
+                        >
                           <TableCell>
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => toggleProductSelection(product.id)}
+                              onClick={(e) => { e.stopPropagation(); toggleProductSelection(product.id); }}
                               aria-label={
                                 selectedProducts.includes(product.id)
                                   ? `Deselect ${product.style_name}`
@@ -698,7 +731,8 @@ export default function Inventory() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setEditingProduct(product);
                                   setIsDialogOpen(true);
                                 }}
@@ -709,7 +743,7 @@ export default function Inventory() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => setDeleteConfirm(product)}
+                                onClick={(e) => { e.stopPropagation(); setDeleteConfirm(product); }}
                                 className="text-destructive"
                                 aria-label={`Delete ${product.style_name}`}
                               >
@@ -843,6 +877,20 @@ export default function Inventory() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Product Detail Sheet */}
+      <ProductDetailSheet
+        product={selectedProduct}
+        stores={stores}
+        isOpen={!!selectedProduct}
+        onClose={() => { setSelectedProduct(null); setIsEditing(false); }}
+        isEditing={isEditing}
+        onEdit={() => setIsEditing(true)}
+        onCancelEdit={() => setIsEditing(false)}
+        onSave={saveProductFromSheet}
+        isSaving={isSaving}
+        getStoreName={getStoreName}
+      />
     </div>
   );
 }
@@ -1019,5 +1067,261 @@ function ProductDialog({ product, stores, isOpen, onClose, onSave, isSaving }) {
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function DetailField({ label, value }) {
+  return (
+    <div>
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="text-sm font-medium text-foreground">{value || '\u2014'}</p>
+    </div>
+  );
+}
+
+function ProductDetailSheet({
+  product,
+  stores,
+  isOpen,
+  onClose,
+  isEditing,
+  onEdit,
+  onCancelEdit,
+  onSave,
+  isSaving,
+  getStoreName,
+}) {
+  const [formData, setFormData] = useState({});
+
+  useEffect(() => {
+    if (product && isEditing) {
+      setFormData({
+        barcode: product.barcode || '',
+        style_name: product.style_name || '',
+        size: product.size || '',
+        color: product.color || '',
+        image_url: product.image_url || '',
+        cost_price: product.cost_price || '',
+        rrp: product.rrp || '',
+        family: product.family || '',
+        category: product.category || '',
+        sub_category: product.sub_category || '',
+        occasion: product.occasion || '',
+        store_id: product.store_id || '',
+        inventory: product.inventory !== undefined ? product.inventory : 0,
+      });
+    }
+  }, [product, isEditing]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave({
+      ...formData,
+      cost_price: formData.cost_price ? parseFloat(formData.cost_price) : null,
+      rrp: formData.rrp ? parseFloat(formData.rrp) : null,
+      inventory: formData.inventory ? parseInt(formData.inventory) : 0,
+    });
+  };
+
+  if (!product) return null;
+
+  const largeImageUrl = product.image_url
+    ? processGoogleDriveLink(product.image_url)?.replace('sz=w200', 'sz=w800')
+    : null;
+
+  return (
+    <Sheet open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent className="sm:max-w-lg overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>{product.style_name || 'Product Details'}</SheetTitle>
+          <SheetDescription>{product.barcode}</SheetDescription>
+        </SheetHeader>
+
+        {!isEditing ? (
+          <div className="space-y-6 py-6">
+            {/* Product Image */}
+            <div className="w-full aspect-square bg-muted rounded-lg overflow-hidden flex items-center justify-center">
+              {product.image_url ? (
+                <img
+                  src={largeImageUrl}
+                  alt={product.style_name}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                  crossOrigin="anonymous"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              ) : (
+                <ImageIcon className="w-16 h-16 text-muted-foreground" />
+              )}
+            </div>
+
+            {/* Detail Fields */}
+            <div className="grid grid-cols-2 gap-4">
+              <DetailField label="Barcode" value={product.barcode} />
+              <DetailField label="Style" value={product.style_name} />
+              <DetailField label="Size" value={product.size} />
+              <DetailField label="Color" value={product.color} />
+              <DetailField label="Store" value={getStoreName(product.store_id)} />
+              <DetailField label="Category" value={product.category} />
+              <DetailField label="Family" value={product.family} />
+              <DetailField label="Sub-Category" value={product.sub_category} />
+              <DetailField label="Occasion" value={product.occasion} />
+              <DetailField
+                label="Cost"
+                value={product.cost_price ? `AED ${product.cost_price.toFixed(2)}` : null}
+              />
+              <DetailField
+                label="RRP"
+                value={product.rrp ? `AED ${product.rrp.toFixed(2)}` : null}
+              />
+              <DetailField label="Inventory" value={product.inventory ?? 0} />
+            </div>
+
+            <SheetFooter>
+              <Button onClick={onEdit}>
+                <Pencil className="w-4 h-4 mr-2" />
+                Edit
+              </Button>
+            </SheetFooter>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4 py-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="sheet-barcode" className="text-foreground">Barcode *</Label>
+                <Input
+                  id="sheet-barcode"
+                  value={formData.barcode}
+                  onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-style_name" className="text-foreground">Style Name *</Label>
+                <Input
+                  id="sheet-style_name"
+                  value={formData.style_name}
+                  onChange={(e) => setFormData({ ...formData, style_name: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-size" className="text-foreground">Size</Label>
+                <Input
+                  id="sheet-size"
+                  value={formData.size}
+                  onChange={(e) => setFormData({ ...formData, size: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-color" className="text-foreground">Color</Label>
+                <Input
+                  id="sheet-color"
+                  value={formData.color}
+                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                />
+              </div>
+              <div className="col-span-2">
+                <Label htmlFor="sheet-image_url" className="text-foreground">Image URL</Label>
+                <Input
+                  id="sheet-image_url"
+                  value={formData.image_url}
+                  onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-cost_price" className="text-foreground">Cost Price</Label>
+                <Input
+                  id="sheet-cost_price"
+                  type="number"
+                  step="0.01"
+                  value={formData.cost_price}
+                  onChange={(e) => setFormData({ ...formData, cost_price: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-rrp" className="text-foreground">RRP</Label>
+                <Input
+                  id="sheet-rrp"
+                  type="number"
+                  step="0.01"
+                  value={formData.rrp}
+                  onChange={(e) => setFormData({ ...formData, rrp: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-store" className="text-foreground">Store *</Label>
+                <Select
+                  value={formData.store_id}
+                  onValueChange={(v) => setFormData({ ...formData, store_id: v })}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select store" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stores.map((store) => (
+                      <SelectItem key={store.id} value={store.id}>
+                        {store.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="sheet-category" className="text-foreground">Category</Label>
+                <Input
+                  id="sheet-category"
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-family" className="text-foreground">Family</Label>
+                <Input
+                  id="sheet-family"
+                  value={formData.family}
+                  onChange={(e) => setFormData({ ...formData, family: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-sub_category" className="text-foreground">Sub-Category</Label>
+                <Input
+                  id="sheet-sub_category"
+                  value={formData.sub_category}
+                  onChange={(e) => setFormData({ ...formData, sub_category: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-occasion" className="text-foreground">Occasion</Label>
+                <Input
+                  id="sheet-occasion"
+                  value={formData.occasion}
+                  onChange={(e) => setFormData({ ...formData, occasion: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-inventory" className="text-foreground">Inventory</Label>
+                <Input
+                  id="sheet-inventory"
+                  type="number"
+                  value={formData.inventory}
+                  onChange={(e) => setFormData({ ...formData, inventory: e.target.value })}
+                />
+              </div>
+            </div>
+            <SheetFooter>
+              <Button type="button" variant="outline" onClick={onCancelEdit}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSaving}>
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Save
+              </Button>
+            </SheetFooter>
+          </form>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }
