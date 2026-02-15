@@ -42,7 +42,10 @@ export function useUpdateOrderItem() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }) => updateOne('order_items', id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orderItems'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
   });
 }
 

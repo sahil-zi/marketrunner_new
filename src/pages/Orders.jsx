@@ -75,10 +75,11 @@ const tableRowVariants = {
 
 function deriveOrderStatus(items) {
   if (items.length === 0) return 'pending';
-  if (items.every((i) => i.status === 'shipped')) return 'shipped';
-  if (items.every((i) => i.status === 'picked')) return 'picked';
-  if (items.every((i) => i.status === 'cancelled')) return 'cancelled';
-  if (items.some((i) => i.status === 'pending')) return 'pending';
+  const activeItems = items.filter((i) => i.status !== 'cancelled');
+  if (activeItems.length === 0) return 'cancelled';
+  if (activeItems.every((i) => i.status === 'shipped')) return 'shipped';
+  if (activeItems.every((i) => i.status === 'picked')) return 'picked';
+  if (activeItems.some((i) => i.status === 'pending')) return 'pending';
   return 'assigned_to_run';
 }
 
@@ -133,11 +134,8 @@ export default function Orders() {
 
       let matchesStatus = true;
       if (filterStatus !== 'all') {
-        const allItemsStatus = order.items.every((item) => item.status === filterStatus);
-        matchesStatus =
-          filterStatus === 'pending'
-            ? order.items.some((item) => item.status === 'pending')
-            : allItemsStatus;
+        const derivedStatus = deriveOrderStatus(order.items);
+        matchesStatus = derivedStatus === filterStatus;
       }
 
       return matchesSearch && matchesPlatform && matchesStatus;
@@ -166,8 +164,14 @@ export default function Orders() {
     const errors = [];
     const warnings = [];
     const existingBarcodes = new Set(products.map((p) => p.barcode));
+    // Exclude fully-cancelled orders so they can be re-imported
     const existingOrderKeys = new Set(
-      orders.map((o) => `${o.platform_name}|${o.platform_order_id}`)
+      orders
+        .filter((o) => {
+          const items = orderItems.filter((item) => item.order_id === o.id);
+          return items.length > 0 && !items.every((i) => i.status === 'cancelled');
+        })
+        .map((o) => `${o.platform_name}|${o.platform_order_id}`)
     );
     const newOrderKeys = new Set();
     let duplicatesFound = 0;
@@ -234,8 +238,14 @@ export default function Orders() {
 
   /* ---- CSV import ----------------------------------------------- */
   async function importOrders(rows, mode) {
+    // Exclude fully-cancelled orders so they can be re-imported as fresh orders
     const existingOrderKeys = new Map(
-      orders.map((o) => [`${o.platform_name}|${o.platform_order_id}`, o.id])
+      orders
+        .filter((o) => {
+          const items = orderItems.filter((item) => item.order_id === o.id);
+          return items.length > 0 && !items.every((i) => i.status === 'cancelled');
+        })
+        .map((o) => [`${o.platform_name}|${o.platform_order_id}`, o.id])
     );
 
     // Group rows by order
@@ -345,11 +355,12 @@ export default function Orders() {
       for (const item of items) {
         await updateOrderItem.mutateAsync({
           id: item.id,
-          data: { status: 'cancelled', notes: `Cancelled: ${reason}` },
+          data: { status: 'cancelled' },
         });
       }
       toast.success(`${items.length} item${items.length !== 1 ? 's' : ''} cancelled`);
-    } catch {
+    } catch (error) {
+      console.error('cancelOrderItems failed:', error);
       toast.error('Failed to cancel order items');
     }
   }
@@ -357,12 +368,13 @@ export default function Orders() {
   /* ---- Mark as Shipped (updates inventory too) ------------------ */
   async function markAsShipped(order) {
     try {
-      // Update order items to shipped
-      await Promise.all(
-        order.items.map((item) =>
-          updateOne('order_items', item.id, { status: 'shipped' })
-        )
-      );
+      // Update order items to shipped via mutation for cache consistency
+      for (const item of order.items) {
+        await updateOrderItem.mutateAsync({
+          id: item.id,
+          data: { status: 'shipped' },
+        });
+      }
 
       // Update inventory for each item
       for (const item of order.items) {
@@ -376,9 +388,9 @@ export default function Orders() {
       }
 
       toast.success('Order marked as shipped, inventory updated');
-      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
-    } catch {
+    } catch (error) {
+      console.error('markAsShipped failed:', error);
       toast.error('Failed to mark as shipped');
     }
   }
