@@ -51,6 +51,7 @@ import AdminSettings from './pages/AdminSettings';
 import Dashboard from './pages/Dashboard';
 import Financials from './pages/Financials';
 import Inventory from './pages/Inventory';
+import Login from './pages/Login';
 import Orders from './pages/Orders';
 import PrintLabels from './pages/PrintLabels';
 import Returns from './pages/Returns';
@@ -68,6 +69,7 @@ export const PAGES = {
     "Dashboard": Dashboard,
     "Financials": Financials,
     "Inventory": Inventory,
+    "Login": Login,
     "Orders": Orders,
     "PrintLabels": PrintLabels,
     "Returns": Returns,

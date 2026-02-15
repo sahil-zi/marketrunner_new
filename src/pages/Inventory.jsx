@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { bulkInsert, bulkUpdate, bulkDelete } from '@/api/supabase/helpers';
 import {
   useProducts,
   useCreateProduct,
@@ -256,7 +256,7 @@ export default function Inventory() {
     ];
 
     if (newStoreNames.length > 0) {
-      const newStoresCreated = await base44.entities.Store.bulkCreate(
+      const newStoresCreated = await bulkInsert('stores',
         newStoreNames.map((name) => ({ name }))
       );
       newStoresCreated.forEach((store) => {
@@ -307,7 +307,7 @@ export default function Inventory() {
       const batchSize = 50;
       for (let i = 0; i < productsToCreate.length; i += batchSize) {
         const batch = productsToCreate.slice(i, i + batchSize);
-        await base44.entities.ProductCatalog.bulkCreate(batch);
+        await bulkInsert('product_catalog', batch);
       }
     }
 
@@ -316,9 +316,7 @@ export default function Inventory() {
       const batchSize = 50;
       for (let i = 0; i < productsToUpdate.length; i += batchSize) {
         const batch = productsToUpdate.slice(i, i + batchSize);
-        await base44.functions.invoke('bulkUpdateProducts', {
-          products: batch,
-        });
+        await bulkUpdate('product_catalog', batch);
       }
     }
 
@@ -369,9 +367,7 @@ export default function Inventory() {
   // Bulk delete products
   async function bulkDeleteProducts() {
     try {
-      await base44.functions.invoke('bulkDeleteProducts', {
-        productIds: selectedProducts,
-      });
+      await bulkDelete('product_catalog', selectedProducts);
       toast.success(`Deleted ${selectedProducts.length} products`);
       setSelectedProducts([]);
       setDeleteConfirm(null);

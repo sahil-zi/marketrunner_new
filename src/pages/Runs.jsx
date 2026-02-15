@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { base44 } from '@/api/base44Client';
+import { createOne, updateOne, filterBy, bulkInsert } from '@/api/supabase/helpers';
+import { supabase } from '@/api/supabaseClient';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -142,7 +143,7 @@ export default function Runs() {
   async function loadRunItems(runId) {
     if (runItemsCache[runId]) return runItemsCache[runId];
 
-    const items = await base44.entities.RunItem.filter({ run_id: runId });
+    const items = await filterBy('run_items', { run_id: runId });
     setRunItemsCache((prev) => ({ ...prev, [runId]: items }));
     return items;
   }
@@ -224,7 +225,7 @@ export default function Runs() {
       });
 
       // Create run
-      const run = await base44.entities.Run.create({
+      const run = await createOne('runs', {
         run_number: runNumber,
         date: new Date().toISOString().split('T')[0],
         status: 'draft',
@@ -256,7 +257,7 @@ export default function Runs() {
         });
 
         for (const orderItemId of item.orderItemIds) {
-          await base44.entities.OrderItem.update(orderItemId, {
+          await updateOne('order_items', orderItemId, {
             status: 'assigned_to_run',
             run_id: run.id,
           });
@@ -284,7 +285,7 @@ export default function Runs() {
         });
 
         for (const returnItemId of item.returnItemIds) {
-          await base44.entities.Return.update(returnItemId, {
+          await updateOne('returns', returnItemId, {
             status: 'assigned_to_run',
             run_id: run.id,
             run_number: runNumber,
@@ -292,7 +293,7 @@ export default function Runs() {
         }
       }
 
-      await base44.entities.RunItem.bulkCreate(runItemsToCreate);
+      await bulkInsert('run_items', runItemsToCreate);
 
       toast.success(
         `Run #${runNumber} created with ${totalPickupItems} pickups and ${totalReturnItems} returns`
@@ -365,7 +366,7 @@ export default function Runs() {
   async function exportRunPDF(runId) {
     try {
       toast.loading('Generating PDF...');
-      const { data } = await base44.functions.invoke('exportRunPDF', { runId });
+      const { data } = await supabase.functions.invoke('export-run-pdf', { body: { runId } });
       const blob = new Blob([data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');

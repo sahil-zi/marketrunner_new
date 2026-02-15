@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { Truck, Loader2, AlertCircle, Delete } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -51,7 +51,8 @@ export default function RunnerLogin() {
     setError('');
 
     try {
-      base44.auth.redirectToLogin(createPageUrl('RunnerHome'));
+      // Redirect to the login page for email/password auth
+      navigate('/Login');
     } catch (err) {
       setError('Invalid PIN. Please try again.');
       setPin('');
@@ -216,7 +217,7 @@ export default function RunnerLogin() {
       >
         <Button
           variant="ghost"
-          onClick={() => base44.auth.redirectToLogin(createPageUrl('RunnerHome'))}
+          onClick={() => navigate('/Login')}
           aria-label="Use email login instead"
           className="mt-8 text-muted-foreground hover:text-foreground hover:bg-muted/50"
         >

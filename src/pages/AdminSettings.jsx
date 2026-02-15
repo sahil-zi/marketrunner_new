@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { motion } from 'framer-motion';
 import {
   Users,
@@ -403,7 +403,10 @@ function AddUserButton() {
 
     setIsAddingUser(true);
     try {
-      await base44.users.inviteUser(email, role);
+      const { error } = await supabase.functions.invoke('invite-user', {
+        body: { email, role, full_name: fullName },
+      });
+      if (error) throw error;
       toast.success('User added successfully. They will receive an email to set up their password.');
       setIsOpen(false);
       setEmail('');

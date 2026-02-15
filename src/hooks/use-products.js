@@ -1,17 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { listAll, createOne, updateOne, deleteOne, bulkInsert, bulkUpdate, bulkDelete } from '@/api/supabase/helpers';
 
 export function useProducts(sortOrder = '-created_date') {
   return useQuery({
     queryKey: ['products', sortOrder],
-    queryFn: () => base44.entities.ProductCatalog.list(sortOrder),
+    queryFn: () => listAll('product_catalog', sortOrder),
   });
 }
 
 export function useCreateProduct() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data) => base44.entities.ProductCatalog.create(data),
+    mutationFn: (data) => createOne('product_catalog', data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 }
@@ -19,7 +19,7 @@ export function useCreateProduct() {
 export function useUpdateProduct() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }) => base44.entities.ProductCatalog.update(id, data),
+    mutationFn: ({ id, data }) => updateOne('product_catalog', id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 }
@@ -27,7 +27,7 @@ export function useUpdateProduct() {
 export function useDeleteProduct() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id) => base44.entities.ProductCatalog.delete(id),
+    mutationFn: (id) => deleteOne('product_catalog', id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 }
@@ -35,7 +35,7 @@ export function useDeleteProduct() {
 export function useBulkCreateProducts() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (products) => base44.entities.ProductCatalog.bulkCreate(products),
+    mutationFn: (products) => bulkInsert('product_catalog', products),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 }
@@ -43,7 +43,7 @@ export function useBulkCreateProducts() {
 export function useBulkUpdateProducts() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (products) => base44.functions.invoke('bulkUpdateProducts', { products }),
+    mutationFn: (products) => bulkUpdate('product_catalog', products),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 }
@@ -51,7 +51,7 @@ export function useBulkUpdateProducts() {
 export function useBulkDeleteProducts() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (productIds) => base44.functions.invoke('bulkDeleteProducts', { productIds }),
+    mutationFn: (productIds) => bulkDelete('product_catalog', productIds),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 }

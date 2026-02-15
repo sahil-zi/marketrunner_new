@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { base44 } from '@/api/base44Client';
+import { createOne, updateOne, filterBy, uploadFile } from '@/api/supabase/helpers';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -175,7 +175,7 @@ export default function RunnerPicking() {
 
     setIsUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file: receiptImage });
+      const { file_url } = await uploadFile('receipts', receiptImage);
 
       const pickupAmount = runItems
         .filter(item => item.type === 'pickup')
@@ -187,7 +187,7 @@ export default function RunnerPicking() {
 
       const netAmount = pickupAmount - returnAmount;
 
-      await base44.entities.RunConfirmation.create({
+      await createOne('run_confirmations', {
         run_id: runId,
         store_id: storeId,
         store_name: store?.name || '',
@@ -198,7 +198,7 @@ export default function RunnerPicking() {
       });
 
       if (netAmount !== 0) {
-        await base44.entities.Ledger.create({
+        await createOne('ledger', {
           store_id: storeId,
           store_name: store?.name || '',
           transaction_type: netAmount > 0 ? 'debit' : 'credit',
@@ -211,38 +211,38 @@ export default function RunnerPicking() {
 
       for (const item of runItems) {
         const newStatus = item.picked_qty > 0 ? (item.type === 'return' ? 'returned' : 'picked') : 'not_found';
-        await base44.entities.RunItem.update(item.id, { status: newStatus });
+        await updateOne('run_items', item.id, { status: newStatus });
 
         if (item.type === 'pickup') {
-          const relatedOrderItems = await base44.entities.OrderItem.filter({
+          const relatedOrderItems = await filterBy('order_items', {
             barcode: item.barcode,
             run_id: runId,
           });
           for (const orderItem of relatedOrderItems) {
-            await base44.entities.OrderItem.update(orderItem.id, { status: newStatus });
+            await updateOne('order_items', orderItem.id, { status: newStatus });
           }
 
           if (item.picked_qty > 0) {
-            const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
+            const products = await filterBy('product_catalog', { barcode: item.barcode });
             if (products.length > 0) {
               const product = products[0];
               const newInventory = Math.max(0, (product.inventory || 0) - item.picked_qty);
-              await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+              await updateOne('product_catalog', product.id, { inventory: newInventory });
             }
           }
         } else if (item.type === 'return' && item.original_return_id) {
           const returnStatus = item.picked_qty > 0 ? 'processed' : 'rejected';
-          await base44.entities.Return.update(item.original_return_id, {
+          await updateOne('returns', item.original_return_id, {
             status: returnStatus,
             processed_at: new Date().toISOString(),
           });
 
           if (item.picked_qty > 0) {
-            const products = await base44.entities.ProductCatalog.filter({ barcode: item.barcode });
+            const products = await filterBy('product_catalog', { barcode: item.barcode });
             if (products.length > 0) {
               const product = products[0];
               const newInventory = (product.inventory || 0) + item.picked_qty;
-              await base44.entities.ProductCatalog.update(product.id, { inventory: newInventory });
+              await updateOne('product_catalog', product.id, { inventory: newInventory });
             }
           }
         }

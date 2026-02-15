@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { createPageUrl } from './utils';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -56,6 +56,7 @@ const moreMenuItems = [
 
 export default function Layout({ children, currentPageName }) {
   const { data: user } = useCurrentUser();
+  const { logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const [sidebarHover, setSidebarHover] = useState(false);
@@ -109,7 +110,7 @@ export default function Layout({ children, currentPageName }) {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => base44.auth.logout()}
+              onClick={() => logout()}
               className="text-muted-foreground hover:text-foreground"
               aria-label="Logout"
             >
@@ -241,7 +242,7 @@ export default function Layout({ children, currentPageName }) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => base44.auth.logout()}
+                onClick={() => logout()}
                 className="text-muted-foreground hover:text-foreground h-8 w-8 shrink-0"
                 aria-label="Logout"
               >
@@ -252,7 +253,7 @@ export default function Layout({ children, currentPageName }) {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => base44.auth.logout()}
+              onClick={() => logout()}
               className="text-muted-foreground hover:text-foreground h-9 w-9"
               aria-label="Logout"
             >
@@ -347,7 +348,7 @@ export default function Layout({ children, currentPageName }) {
               ))}
               <button
                 onClick={() => {
-                  base44.auth.logout();
+                  logout();
                   setShowMore(false);
                 }}
                 className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg transition-colors text-destructive hover:bg-destructive/10 min-h-[64px]"

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { createOne, updateOne, bulkInsert } from '@/api/supabase/helpers';
 import { motion } from 'framer-motion';
 import {
   ShoppingCart,
@@ -275,7 +275,7 @@ export default function Orders() {
       if (existingOrderKeys.has(orderKey)) {
         orderId = existingOrderKeys.get(orderKey);
       } else {
-        const newOrder = await base44.entities.Order.create({
+        const newOrder = await createOne('orders', {
           platform_name: orderData.platform,
           platform_order_id: orderData.orderId,
           order_timestamp: orderData.orderDate
@@ -294,7 +294,7 @@ export default function Orders() {
         status: 'pending',
       }));
 
-      await base44.entities.OrderItem.bulkCreate(itemsToCreate);
+      await bulkInsert('order_items', itemsToCreate);
       itemsCreated += itemsToCreate.length;
     }
 
@@ -356,7 +356,7 @@ export default function Orders() {
       // Update order items to shipped
       await Promise.all(
         order.items.map((item) =>
-          base44.entities.OrderItem.update(item.id, { status: 'shipped' })
+          updateOne('order_items', item.id, { status: 'shipped' })
         )
       );
 
@@ -365,7 +365,7 @@ export default function Orders() {
         const product = products.find((p) => p.barcode === item.barcode);
         if (product) {
           const newInventory = (product.inventory || 0) - item.quantity;
-          await base44.entities.ProductCatalog.update(product.id, {
+          await updateOne('product_catalog', product.id, {
             inventory: Math.max(0, newInventory),
           });
         }

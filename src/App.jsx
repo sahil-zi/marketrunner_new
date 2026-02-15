@@ -2,12 +2,10 @@ import { Suspense } from 'react';
 import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import NavigationTracker from '@/lib/NavigationTracker'
 import { pagesConfig } from './pages.config'
-import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
-import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -71,19 +69,19 @@ const AnimatedRoutes = () => {
 };
 
 const AuthenticatedApp = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
+  const { isLoadingAuth, isAuthenticated } = useAuth();
+  const location = useLocation();
 
-  if (isLoadingPublicSettings || isLoadingAuth) {
+  if (isLoadingAuth) {
     return <PageLoader />;
   }
 
-  if (authError) {
-    if (authError.type === 'user_not_registered') {
-      return <UserNotRegisteredError />;
-    } else if (authError.type === 'auth_required') {
-      navigateToLogin();
-      return null;
-    }
+  // Allow access to Login and RunnerLogin without auth
+  const publicPaths = ['/Login', '/RunnerLogin'];
+  const isPublicPath = publicPaths.some(p => location.pathname.startsWith(p));
+
+  if (!isAuthenticated && !isPublicPath) {
+    return <Navigate to="/Login" replace />;
   }
 
   return <AnimatedRoutes />;
@@ -97,7 +95,6 @@ function App() {
       <AuthProvider>
         <QueryClientProvider client={queryClientInstance}>
           <Router>
-            <NavigationTracker />
             <AuthenticatedApp />
           </Router>
           <Toaster />

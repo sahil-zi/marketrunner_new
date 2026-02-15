@@ -1,24 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { listAll, filterBy, updateOne, bulkInsert } from '@/api/supabase/helpers';
 
 export function useReturns(sortOrder = '-created_date') {
   return useQuery({
     queryKey: ['returns', sortOrder],
-    queryFn: () => base44.entities.Return.list(sortOrder),
+    queryFn: () => listAll('returns', sortOrder),
   });
 }
 
 export function usePendingReturns() {
   return useQuery({
     queryKey: ['returns', 'pending'],
-    queryFn: () => base44.entities.Return.filter({ status: 'pending' }),
+    queryFn: () => filterBy('returns', { status: 'pending' }),
   });
 }
 
 export function useUpdateReturn() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Return.update(id, data),
+    mutationFn: ({ id, data }) => updateOne('returns', id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['returns'] }),
   });
 }
@@ -26,7 +26,7 @@ export function useUpdateReturn() {
 export function useBulkCreateReturns() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (returns) => base44.entities.Return.bulkCreate(returns),
+    mutationFn: (returns) => bulkInsert('returns', returns),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['returns'] }),
   });
 }

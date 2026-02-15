@@ -1,17 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { listAll, createOne, updateOne, deleteOne, bulkInsert } from '@/api/supabase/helpers';
 
 export function useStores() {
   return useQuery({
     queryKey: ['stores'],
-    queryFn: () => base44.entities.Store.list(),
+    queryFn: () => listAll('stores'),
   });
 }
 
 export function useCreateStore() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data) => base44.entities.Store.create(data),
+    mutationFn: (data) => createOne('stores', data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['stores'] }),
   });
 }
@@ -19,7 +19,7 @@ export function useCreateStore() {
 export function useUpdateStore() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Store.update(id, data),
+    mutationFn: ({ id, data }) => updateOne('stores', id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['stores'] }),
   });
 }
@@ -27,7 +27,7 @@ export function useUpdateStore() {
 export function useDeleteStore() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id) => base44.entities.Store.delete(id),
+    mutationFn: (id) => deleteOne('stores', id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['stores'] }),
   });
 }
@@ -35,7 +35,7 @@ export function useDeleteStore() {
 export function useBulkCreateStores() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (stores) => base44.entities.Store.bulkCreate(stores),
+    mutationFn: (stores) => bulkInsert('stores', stores),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['stores'] }),
   });
 }

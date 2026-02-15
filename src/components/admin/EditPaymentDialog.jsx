@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { base44 } from '@/api/base44Client';
+import { updateOne, filterBy, uploadFile } from '@/api/supabase/helpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -60,16 +60,16 @@ export default function EditPaymentDialog({
 
       // Upload new receipt if provided
       if (newReceipt) {
-        const { file_url } = await base44.integrations.Core.UploadFile({ file: newReceipt });
+        const { file_url } = await uploadFile('receipts', newReceipt);
         updatedData.receipt_image_url = file_url;
       }
 
       // Update confirmation
-      await base44.entities.RunConfirmation.update(confirmation.id, updatedData);
+      await updateOne('run_confirmations', confirmation.id, updatedData);
 
       // Update corresponding ledger entry
-      const ledgerEntries = await base44.entities.Ledger.filter({ 
-        run_confirmation_id: confirmation.id 
+      const ledgerEntries = await filterBy('ledger', {
+        run_confirmation_id: confirmation.id
       });
 
       if (ledgerEntries.length > 0) {
@@ -79,7 +79,7 @@ export default function EditPaymentDialog({
 
         if (difference !== 0) {
           // Update the original ledger entry
-          await base44.entities.Ledger.update(ledgerEntries[0].id, {
+          await updateOne('ledger', ledgerEntries[0].id, {
             amount: newAmount,
             notes: `${ledgerEntries[0].notes} (Updated from $${oldAmount.toFixed(2)})`
           });

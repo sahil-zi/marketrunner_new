@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { createOne, updateOne, filterBy, listAll, bulkInsert } from '@/api/supabase/helpers';
 import {
   PackageX,
   Search,
@@ -107,7 +107,7 @@ export default function Returns() {
       // If approved, create a credit ledger entry and update inventory
       if (status === 'processed') {
         if (returnItem.return_amount) {
-          await base44.entities.Ledger.create({
+          await createOne('ledger', {
             store_id: returnItem.store_id,
             store_name: returnItem.store_name,
             transaction_type: 'credit',
@@ -118,13 +118,13 @@ export default function Returns() {
         }
 
         // Update inventory
-        const products = await base44.entities.ProductCatalog.filter({
+        const products = await filterBy('product_catalog', {
           barcode: returnItem.barcode,
         });
         if (products.length > 0) {
           const product = products[0];
           const newInventory = (product.inventory || 0) + returnItem.quantity;
-          await base44.entities.ProductCatalog.update(product.id, {
+          await updateOne('product_catalog', product.id, {
             inventory: newInventory,
           });
         }
@@ -195,7 +195,7 @@ export default function Returns() {
     ];
 
     if (newStoreNames.length > 0) {
-      const createdStores = await base44.entities.Store.bulkCreate(
+      const createdStores = await bulkInsert('stores',
         newStoreNames.map((name) => ({ name }))
       );
       createdStores.forEach((store) => {
@@ -236,17 +236,17 @@ export default function Returns() {
     }
 
     if (returnsToCreate.length > 0) {
-      await base44.entities.Return.bulkCreate(returnsToCreate);
+      await bulkInsert('returns', returnsToCreate);
 
       // Update inventory
-      const productCatalog = await base44.entities.ProductCatalog.list();
+      const productCatalog = await listAll('product_catalog');
       const productMap = new Map(productCatalog.map((p) => [p.barcode, p]));
 
       for (const item of productsToUpdateInventory) {
         const product = productMap.get(item.barcode);
         if (product) {
           const newInventory = (product.inventory || 0) + item.quantity;
-          await base44.entities.ProductCatalog.update(product.id, {
+          await updateOne('product_catalog', product.id, {
             inventory: newInventory,
           });
         }
@@ -255,7 +255,7 @@ export default function Returns() {
       // Create ledger entries for returns
       for (const returnItem of returnsToCreate) {
         if (returnItem.return_amount) {
-          await base44.entities.Ledger.create({
+          await createOne('ledger', {
             store_id: returnItem.store_id,
             store_name: returnItem.store_name,
             transaction_type: 'credit',
