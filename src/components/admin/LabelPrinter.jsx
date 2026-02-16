@@ -25,11 +25,11 @@ function generateBarcodeLayout(barcode, style, size) {
 ^XZ`;
 }
 
-// Generate a store separator label (same 4x3cm format)
-function generateStoreSeparatorZPL(storeName, itemCount) {
+// Generate a store summary label (same 4x3cm format)
+function generateStoreSummaryZPL(storeName, unitCount, styleCount) {
   return `^XA^PW400^LL240^CI28
-^FO20,60^A0N,50,50^FB360,2,0,C,0^FD${storeName}^FS
-^FO20,150^A0N,35,35^FB360,1,0,C,0^FD${itemCount} item${itemCount !== 1 ? 's' : ''}^FS
+^FO20,40^A0N,50,50^FB360,2,0,C,0^FD${storeName}^FS
+^FO20,140^A0N,30,30^FB360,1,0,C,0^FD${unitCount} unit${unitCount !== 1 ? 's' : ''} | ${styleCount} style${styleCount !== 1 ? 's' : ''}^FS
 ^XZ`;
 }
 
@@ -61,12 +61,7 @@ export function generateZPL(items, mode = 'QR') {
   storeNames.forEach(storeName => {
     const groupItems = storeGroups[storeName];
 
-    // Insert separator label if items have store names
-    if (hasStoreNames && storeName !== '') {
-      const totalQty = groupItems.reduce((sum, item) => sum + (item.target_qty || item.quantity || 1), 0);
-      zpl += generateStoreSeparatorZPL(storeName, totalQty) + '\n';
-    }
-
+    // Print barcode labels first
     groupItems.forEach(item => {
       const barcode = item.barcode || '';
       const style = (item.style_name || '').substring(0, 30);
@@ -77,6 +72,13 @@ export function generateZPL(items, mode = 'QR') {
         zpl += layoutFn(barcode, style, size) + '\n';
       }
     });
+
+    // Then print store summary label at the end
+    if (hasStoreNames && storeName !== '') {
+      const totalQty = groupItems.reduce((sum, item) => sum + (item.target_qty || item.quantity || 1), 0);
+      const styleCount = new Set(groupItems.map(item => item.style_name || item.barcode)).size;
+      zpl += generateStoreSummaryZPL(storeName, totalQty, styleCount) + '\n';
+    }
   });
 
   return zpl;
