@@ -61,6 +61,8 @@ import RunnerLogin from './pages/RunnerLogin';
 import RunnerPickStore from './pages/RunnerPickStore';
 import RunnerPicking from './pages/RunnerPicking';
 import Runs from './pages/Runs';
+import StoreLogin from './pages/StoreLogin';
+import StoreOrders from './pages/StoreOrders';
 import __Layout from './Layout.jsx';
 
 
@@ -79,6 +81,8 @@ export const PAGES = {
     "RunnerPickStore": RunnerPickStore,
     "RunnerPicking": RunnerPicking,
     "Runs": Runs,
+    "StoreLogin": StoreLogin,
+    "StoreOrders": StoreOrders,
 }
 
 export const pagesConfig = {

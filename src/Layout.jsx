@@ -24,10 +24,13 @@ import {
   Home,
   MoreHorizontal,
   Printer,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useTheme } from '@/hooks/use-theme';
 
 const adminNavItems = [
   { name: 'Dashboard', icon: LayoutDashboard, page: 'Dashboard' },
@@ -64,6 +67,7 @@ export default function Layout({ children, currentPageName }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [showMore, setShowMore] = useState(false);
   const isMobile = useIsMobile();
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -78,11 +82,60 @@ export default function Layout({ children, currentPageName }) {
 
   const runnerPages = ['RunnerHome', 'RunnerPickStore', 'RunnerPicking', 'RunnerLogin'];
   const isRunnerPage = runnerPages.includes(currentPageName);
-  const publicPages = ['Login', 'RunnerLogin'];
+  const storePages = ['StoreOrders', 'StoreLogin'];
+  const isStorePage = storePages.includes(currentPageName);
+  const publicPages = ['Login', 'RunnerLogin', 'StoreLogin'];
   const isPublicPage = publicPages.includes(currentPageName);
 
   if (isPublicPage) {
     return <>{children}</>;
+  }
+
+  // Store Owner Layout
+  if (isStorePage) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+          <span className="font-semibold text-lg text-foreground">
+            {user?.store_name || 'Store Portal'}
+          </span>
+          <div className="flex items-center gap-3">
+            {isOnline ? (
+              <div className="flex items-center gap-1.5 text-success text-sm font-medium">
+                <Wifi className="w-4 h-4" />
+                <span>Online</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-warning text-sm font-medium">
+                <WifiOff className="w-4 h-4" />
+                <span>Offline</span>
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => logout()}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
+        </header>
+        <main className="p-4 lg:p-8 max-w-[1200px] mx-auto">
+          {children}
+        </main>
+      </div>
+    );
   }
 
   // Runner Layout
@@ -240,15 +293,26 @@ export default function Layout({ children, currentPageName }) {
                   <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => logout()}
-                className="text-muted-foreground hover:text-foreground h-8 w-8 shrink-0"
-                aria-label="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-              </Button>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleTheme}
+                  className="text-muted-foreground hover:text-foreground h-8 w-8"
+                  aria-label="Toggle theme"
+                >
+                  {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => logout()}
+                  className="text-muted-foreground hover:text-foreground h-8 w-8"
+                  aria-label="Logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           ) : (
             <Button
@@ -273,6 +337,15 @@ export default function Layout({ children, currentPageName }) {
           <span className="font-bold text-lg text-foreground">MarketRunner</span>
         </Link>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="text-muted-foreground hover:text-foreground h-8 w-8"
+            aria-label="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </Button>
           {user && (
             <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
               <User className="w-4 h-4 text-muted-foreground" />

@@ -70,6 +70,7 @@ export default function AdminSettings() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedStoreLink, setCopiedStoreLink] = useState(false);
 
   const isSaving = createStore.isPending || updateStore.isPending;
 
@@ -100,12 +101,20 @@ export default function AdminSettings() {
   }
 
   const runnerLoginUrl = `${window.location.origin}${window.location.pathname}#/RunnerLogin`;
+  const storeLoginUrl = `${window.location.origin}${window.location.pathname}#/StoreLogin`;
 
   const copyRunnerLink = () => {
     navigator.clipboard.writeText(runnerLoginUrl);
     setCopiedLink(true);
     toast.success('Link copied to clipboard');
     setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const copyStoreLink = () => {
+    navigator.clipboard.writeText(storeLoginUrl);
+    setCopiedStoreLink(true);
+    toast.success('Link copied to clipboard');
+    setTimeout(() => setCopiedStoreLink(false), 2000);
   };
 
   return (
@@ -147,6 +156,52 @@ export default function AdminSettings() {
               )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Store Login Access Link */}
+      <Card className="border-primary/20 bg-primary/5">
+        <CardHeader>
+          <CardTitle className="text-lg text-foreground">Store Login Access Link</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Share this link with store owners to access their order portal:
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={storeLoginUrl}
+              readOnly
+              className="bg-card"
+            />
+            <Button
+              onClick={copyStoreLink}
+              className="shrink-0"
+            >
+              {copiedStoreLink ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy Link
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Store Owners */}
+      <Card className="bg-card">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-foreground">Store Owners</CardTitle>
+          <AddStoreOwnerButton stores={stores} />
+        </CardHeader>
+        <CardContent>
+          <StoreOwnersTable stores={stores} />
         </CardContent>
       </Card>
 
@@ -478,6 +533,171 @@ function AddUserButton() {
               <Button type="submit" disabled={isAddingUser}>
                 {isAddingUser && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
                 Add User
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function StoreOwnersTable({ stores }) {
+  const { data: users = [] } = useUsers();
+  const storeOwners = users.filter((u) => u.role === 'store_owner');
+
+  const storeMap = Object.fromEntries((stores || []).map((s) => [s.id, s]));
+
+  if (storeOwners.length === 0) {
+    return (
+      <EmptyState
+        icon={StoreIcon}
+        title="No store owners yet"
+        description="Add a store owner to give them access to their order portal."
+      />
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Email</TableHead>
+          <TableHead>Store</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody
+        as={motion.tbody}
+        variants={staggerContainer}
+        initial="hidden"
+        animate="visible"
+      >
+        {storeOwners.map((owner) => (
+          <motion.tr
+            key={owner.id}
+            variants={staggerRow}
+            className="border-b border-border transition-colors hover:bg-muted/50"
+          >
+            <TableCell className="font-medium text-foreground">{owner.full_name || '\u2014'}</TableCell>
+            <TableCell className="text-muted-foreground">{owner.email}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {storeMap[owner.store_id]?.name || '\u2014'}
+            </TableCell>
+          </motion.tr>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function AddStoreOwnerButton({ stores }) {
+  const queryClient = useQueryClient();
+  const [isOpen, setIsOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [password, setPassword] = useState('');
+  const [storeId, setStoreId] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!email || !password || !storeId) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      const { error } = await supabase.functions.invoke('create-store-owner', {
+        body: { email, password, full_name: fullName, store_id: storeId },
+      });
+      if (error) throw error;
+      toast.success('Store owner created successfully');
+      setIsOpen(false);
+      setEmail('');
+      setFullName('');
+      setPassword('');
+      setStoreId('');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (error) {
+      toast.error(error.message || 'Failed to create store owner');
+    } finally {
+      setIsAdding(false);
+    }
+  }
+
+  return (
+    <>
+      <Button onClick={() => setIsOpen(true)}>
+        <Plus className="w-4 h-4 mr-2" />
+        Add Store Owner
+      </Button>
+
+      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Add Store Owner</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="so-email" className="text-foreground">Email Address *</Label>
+              <Input
+                id="so-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="owner@example.com"
+                className="bg-muted"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="so-name" className="text-foreground">Full Name</Label>
+              <Input
+                id="so-name"
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Store Owner Name"
+                className="bg-muted"
+              />
+            </div>
+            <div>
+              <Label htmlFor="so-password" className="text-foreground">Password *</Label>
+              <Input
+                id="so-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Set a password"
+                className="bg-muted"
+                required
+                minLength={6}
+              />
+            </div>
+            <div>
+              <Label htmlFor="so-store" className="text-foreground">Store *</Label>
+              <Select value={storeId} onValueChange={setStoreId}>
+                <SelectTrigger className="bg-muted">
+                  <SelectValue placeholder="Select a store" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(stores || []).map((store) => (
+                    <SelectItem key={store.id} value={store.id}>
+                      {store.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isAdding}>
+                {isAdding && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                Create Store Owner
               </Button>
             </DialogFooter>
           </form>

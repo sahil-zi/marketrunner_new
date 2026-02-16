@@ -76,12 +76,20 @@ const AuthenticatedApp = () => {
     return <PageLoader />;
   }
 
-  // Allow access to Login and RunnerLogin without auth
-  const publicPaths = ['/Login', '/RunnerLogin'];
+  // Allow access to Login, RunnerLogin, and StoreLogin without auth
+  const publicPaths = ['/Login', '/RunnerLogin', '/StoreLogin'];
   const isPublicPath = publicPaths.some(p => location.pathname.startsWith(p));
 
   if (!isAuthenticated && !isPublicPath) {
     return <Navigate to="/Login" replace />;
+  }
+
+  // Role-based redirect: store owners can only access store pages
+  const { user } = useAuth();
+  const storePages = ['/StoreOrders', '/StoreLogin'];
+  const isStorePage = storePages.some(p => location.pathname.startsWith(p));
+  if (isAuthenticated && user?.role === 'store_owner' && !isStorePage) {
+    return <Navigate to="/StoreOrders" replace />;
   }
 
   return <AnimatedRoutes />;
