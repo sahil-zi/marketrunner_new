@@ -147,7 +147,7 @@ export default function Dashboard() {
         <StatCard title="Total Products" value={stats.totalProducts.toLocaleString()} icon={Package} color="primary" isLoading={isLoading} />
         <StatCard title="Pending Orders" value={stats.pendingOrders.toLocaleString()} icon={ShoppingCart} color="info" isLoading={isLoading} />
         <StatCard title="Active Runs" value={stats.activeRuns.toLocaleString()} icon={Truck} color="warning" isLoading={isLoading} />
-        <StatCard title="Store Balance" value={`د.إ ${Math.abs(stats.storeBalance).toFixed(2)}`} icon={DollarSign} color={stats.storeBalance >= 0 ? 'success' : 'warning'} isLoading={isLoading} />
+        <StatCard title="Store Balance" value={`AED ${Math.abs(stats.storeBalance).toFixed(2)}`} icon={DollarSign} color={stats.storeBalance >= 0 ? 'success' : 'warning'} isLoading={isLoading} />
       </motion.div>
 
       <Card>

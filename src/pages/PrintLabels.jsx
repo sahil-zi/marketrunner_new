@@ -81,7 +81,7 @@ function itemKey(item) {
 }
 
 // Shared grouped list with accordion + checkboxes
-function GroupedItemList({ groups, selectedIds, toggleOne, toggleStyle, storeMap, allSelected, toggleAll, totalCount, selectedCount }) {
+function GroupedItemList({ groups, selectedIds, toggleOne, toggleStyle, storeMap, allSelected, toggleAll, totalCount, selectedCount, labelCounts, setLabelCount }) {
   return (
     <>
       {/* Select all bar */}
@@ -162,11 +162,23 @@ function GroupedItemList({ groups, selectedIds, toggleOne, toggleStyle, storeMap
                             {item.size}
                           </span>
                         )}
-                        {(item.quantity || item.target_qty) && (
+                        {checked && labelCounts && setLabelCount ? (
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <span className="text-xs text-muted-foreground">×</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={999}
+                              value={labelCounts[key] ?? 1}
+                              onChange={(e) => setLabelCount(key, Math.max(1, parseInt(e.target.value) || 1))}
+                              className="h-7 w-16 text-xs text-center px-1"
+                            />
+                          </div>
+                        ) : (item.quantity || item.target_qty) ? (
                           <span className="text-xs text-muted-foreground">
                             ×{item.target_qty || item.quantity}
                           </span>
-                        )}
+                        ) : null}
                         <Printer className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </div>
                     );
@@ -190,6 +202,9 @@ export default function PrintLabels() {
   const [storeFilter, setStoreFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [labelMode, setLabelMode] = useState('QR');
+
+  // Label copy counts (item key -> number of copies)
+  const [labelCounts, setLabelCounts] = useState({});
 
   // CSV upload state
   const [csvItems, setCsvItems] = useState([]);
@@ -343,8 +358,22 @@ export default function PrintLabels() {
     toast.success(`${items.length} label${items.length !== 1 ? 's' : ''} loaded from CSV`);
   }, []);
 
-  // Active selection based on tab
-  const activeItems = activeTab === 'inventory' ? selectedProducts : selectedCsvItems;
+  const handleSetLabelCount = useCallback((key, count) => {
+    setLabelCounts((prev) => ({ ...prev, [key]: count }));
+  }, []);
+
+  // Active selection based on tab, with label counts applied
+  const activeItems = useMemo(() => {
+    const items = activeTab === 'inventory' ? selectedProducts : selectedCsvItems;
+    return items.map((item) => {
+      const key = itemKey(item);
+      const count = labelCounts[key];
+      if (count && count > 0) {
+        return { ...item, quantity: count, target_qty: undefined };
+      }
+      return { ...item, quantity: 1, target_qty: undefined };
+    });
+  }, [activeTab, selectedProducts, selectedCsvItems, labelCounts]);
 
   if (isLoading) {
     return (
@@ -361,7 +390,10 @@ export default function PrintLabels() {
           <LabelPrinter
             items={activeItems}
             mode={labelMode}
-            buttonText={`Print ${activeItems.length} Label${activeItems.length !== 1 ? 's' : ''}`}
+            buttonText={(() => {
+              const totalLabels = activeItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+              return `Print ${totalLabels} Label${totalLabels !== 1 ? 's' : ''}`;
+            })()}
           />
         )}
       </PageHeader>
@@ -447,6 +479,8 @@ export default function PrintLabels() {
               toggleAll={toggleAllInventory}
               totalCount={enrichedProducts.length}
               selectedCount={selectedIds.size}
+              labelCounts={labelCounts}
+              setLabelCount={handleSetLabelCount}
             />
           )}
         </TabsContent>
@@ -489,6 +523,8 @@ export default function PrintLabels() {
                 toggleAll={toggleAllCsv}
                 totalCount={csvItems.length}
                 selectedCount={csvSelectedIds.size}
+                labelCounts={labelCounts}
+                setLabelCount={handleSetLabelCount}
               />
             </>
           )}

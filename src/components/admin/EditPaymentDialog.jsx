@@ -81,7 +81,7 @@ export default function EditPaymentDialog({
           // Update the original ledger entry
           await updateOne('ledger', ledgerEntries[0].id, {
             amount: newAmount,
-            notes: `${ledgerEntries[0].notes} (Updated from $${oldAmount.toFixed(2)})`
+            notes: `${ledgerEntries[0].notes} (Updated from AED ${oldAmount.toFixed(2)})`
           });
         }
       }
