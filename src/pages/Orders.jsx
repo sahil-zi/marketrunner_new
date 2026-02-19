@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -103,6 +104,9 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPlatform, setFilterPlatform] = useState('all');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
 
   /* ---- Derived data --------------------------------------------- */
   const platforms = useMemo(
@@ -138,9 +142,22 @@ export default function Orders() {
         matchesStatus = derivedStatus === filterStatus;
       }
 
-      return matchesSearch && matchesPlatform && matchesStatus;
+      let matchesDate = true;
+      if (filterDateFrom || filterDateTo) {
+        const orderDate = order.order_timestamp
+          ? new Date(order.order_timestamp).toISOString().split('T')[0]
+          : null;
+        if (!orderDate) {
+          matchesDate = false;
+        } else {
+          if (filterDateFrom && orderDate < filterDateFrom) matchesDate = false;
+          if (filterDateTo && orderDate > filterDateTo) matchesDate = false;
+        }
+      }
+
+      return matchesSearch && matchesPlatform && matchesStatus && matchesDate;
     });
-  }, [ordersWithItems, searchQuery, filterPlatform, filterStatus]);
+  }, [ordersWithItems, searchQuery, filterPlatform, filterStatus, filterDateFrom, filterDateTo]);
 
   /* ---- Pagination ----------------------------------------------- */
   const {
@@ -313,8 +330,36 @@ export default function Orders() {
     queryClient.invalidateQueries({ queryKey: ['orderItems'] });
   }
 
+  /* ---- Selection helpers ---------------------------------------- */
+  const allFilteredIds = useMemo(() => filteredOrders.map((o) => o.id), [filteredOrders]);
+  const allSelected =
+    allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedOrderIds.has(id));
+  const someSelected = allFilteredIds.some((id) => selectedOrderIds.has(id));
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedOrderIds(new Set());
+    } else {
+      setSelectedOrderIds(new Set(allFilteredIds));
+    }
+  }
+
+  function toggleSelectOrder(id) {
+    setSelectedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   /* ---- Export CSV ------------------------------------------------ */
   function exportOrders() {
+    const toExport =
+      selectedOrderIds.size > 0
+        ? filteredOrders.filter((o) => selectedOrderIds.has(o.id))
+        : filteredOrders;
+
     const headers = [
       'Platform',
       'OrderID',
@@ -324,7 +369,7 @@ export default function Orders() {
       'Quantity',
       'Status',
     ];
-    const rows = ordersWithItems.flatMap((order) =>
+    const rows = toExport.flatMap((order) =>
       order.items.map((item) => [
         order.platform_name,
         order.platform_order_id,
@@ -346,7 +391,11 @@ export default function Orders() {
     a.download = `orders_export_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('Orders exported');
+    toast.success(
+      selectedOrderIds.size > 0
+        ? `Exported ${selectedOrderIds.size} selected order${selectedOrderIds.size !== 1 ? 's' : ''}`
+        : `Exported ${toExport.length} order${toExport.length !== 1 ? 's' : ''}`
+    );
   }
 
   /* ---- Cancel order items --------------------------------------- */
@@ -418,12 +467,13 @@ export default function Orders() {
         <TabsContent value="browse" className="space-y-6">
           {/* Filters */}
           <Card className="border-border bg-card">
-            <CardContent className="p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <CardContent className="p-4 space-y-3">
+              {/* Row 1: search + marketplace + status */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="relative flex-1 min-w-0">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    placeholder="Search by order ID..."
+                    placeholder="Search by order ID or marketplace..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10 bg-background border-border"
@@ -431,10 +481,10 @@ export default function Orders() {
                 </div>
                 <Select value={filterPlatform} onValueChange={setFilterPlatform}>
                   <SelectTrigger className="w-full sm:w-48 bg-card border-border text-foreground">
-                    <SelectValue placeholder="Filter by platform" />
+                    <SelectValue placeholder="Marketplace" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Platforms</SelectItem>
+                    <SelectItem value="all">All Marketplaces</SelectItem>
                     {platforms.map((platform) => (
                       <SelectItem key={platform} value={platform}>
                         {platform}
@@ -444,7 +494,7 @@ export default function Orders() {
                 </Select>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger className="w-full sm:w-48 bg-card border-border text-foreground">
-                    <SelectValue placeholder="Filter by status" />
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
@@ -455,14 +505,54 @@ export default function Orders() {
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button
-                  variant="outline"
-                  onClick={exportOrders}
-                  className="shrink-0"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Export Orders
-                </Button>
+              </div>
+              {/* Row 2: date range + export */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex items-center gap-2 flex-1">
+                  <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <Input
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                    className="bg-background border-border text-foreground"
+                    title="Order date from"
+                  />
+                  <span className="text-muted-foreground text-sm shrink-0">to</span>
+                  <Input
+                    type="date"
+                    value={filterDateTo}
+                    onChange={(e) => setFilterDateTo(e.target.value)}
+                    className="bg-background border-border text-foreground"
+                    title="Order date to"
+                  />
+                  {(filterDateFrom || filterDateTo) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
+                      className="text-muted-foreground shrink-0"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  {selectedOrderIds.size > 0 && (
+                    <span className="text-sm text-muted-foreground shrink-0">
+                      {selectedOrderIds.size} selected
+                    </span>
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={exportOrders}
+                    className="shrink-0"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    {selectedOrderIds.size > 0
+                      ? `Export Selected (${selectedOrderIds.size})`
+                      : 'Export All'}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -479,7 +569,7 @@ export default function Orders() {
                   icon={ShoppingCart}
                   title="No orders found"
                   description={
-                    searchQuery || filterStatus !== 'all' || filterPlatform !== 'all'
+                    searchQuery || filterStatus !== 'all' || filterPlatform !== 'all' || filterDateFrom || filterDateTo
                       ? 'Try adjusting your search or filter criteria.'
                       : 'Import orders from the CSV tab to get started.'
                   }
@@ -489,7 +579,15 @@ export default function Orders() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Platform</TableHead>
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={allSelected}
+                            data-state={someSelected && !allSelected ? 'indeterminate' : undefined}
+                            onCheckedChange={toggleSelectAll}
+                            aria-label="Select all orders"
+                          />
+                        </TableHead>
+                        <TableHead>Marketplace</TableHead>
                         <TableHead>Order ID</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Items</TableHead>
@@ -511,8 +609,17 @@ export default function Orders() {
                           <motion.tr
                             key={order.id}
                             variants={tableRowVariants}
-                            className="border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                            className={`border-b border-border transition-colors hover:bg-muted/50 ${selectedOrderIds.has(order.id) ? 'bg-muted/40' : ''}`}
                           >
+                            {/* Checkbox */}
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedOrderIds.has(order.id)}
+                                onCheckedChange={() => toggleSelectOrder(order.id)}
+                                aria-label={`Select order ${order.platform_order_id}`}
+                              />
+                            </TableCell>
+
                             {/* Platform */}
                             <TableCell>
                               <Badge variant="secondary">{order.platform_name}</Badge>

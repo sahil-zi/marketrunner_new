@@ -609,10 +609,18 @@ function AddStoreOwnerButton({ stores }) {
 
     setIsAdding(true);
     try {
-      const { error } = await supabase.functions.invoke('create-store-owner', {
+      const res = await supabase.functions.invoke('create-store-owner', {
         body: { email, password, full_name: fullName, store_id: storeId },
       });
-      if (error) throw error;
+      console.log('create-store-owner response:', res);
+      if (res.error) {
+        // Edge function errors may have context in the response body
+        const msg = typeof res.error === 'object' && res.error.context
+          ? await res.error.context.text().catch(() => res.error.message)
+          : res.error.message || res.error;
+        throw new Error(msg);
+      }
+      if (res.data?.error) throw new Error(res.data.error);
       toast.success('Store owner created successfully');
       setIsOpen(false);
       setEmail('');
@@ -621,6 +629,7 @@ function AddStoreOwnerButton({ stores }) {
       setStoreId('');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (error) {
+      console.error('create-store-owner error:', error);
       toast.error(error.message || 'Failed to create store owner');
     } finally {
       setIsAdding(false);
