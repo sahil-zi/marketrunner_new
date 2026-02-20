@@ -60,6 +60,7 @@ export default function RunnerPicking() {
 
   // Local UI state
   const [showConfirmZero, setShowConfirmZero] = useState(null);
+  const [showConfirmOver, setShowConfirmOver] = useState(null);
   const [holdProgress, setHoldProgress] = useState(0);
   const [showComplete, setShowComplete] = useState(false);
   const [receiptImage, setReceiptImage] = useState(null);
@@ -102,11 +103,25 @@ export default function RunnerPicking() {
   const unpickedItems = runItems.filter(i => i.target_qty > 0 && (i.picked_qty || 0) === 0);
 
   function updatePickedQty(item, delta) {
-    const newQty = Math.max(0, Math.min((item.picked_qty || 0) + delta, item.target_qty + 10));
+    const current = item.picked_qty || 0;
+    if (delta > 0 && current >= item.target_qty) {
+      setShowConfirmOver(item);
+      return;
+    }
+    const newQty = Math.max(0, Math.min(current + delta, item.target_qty + 10));
     updateRunItem.mutate(
       { id: item.id, data: { picked_qty: newQty } },
       { onError: () => toast.error('Failed to update') }
     );
+  }
+
+  function confirmOver(item) {
+    const newQty = Math.min((item.picked_qty || 0) + 1, item.target_qty + 10);
+    updateRunItem.mutate(
+      { id: item.id, data: { picked_qty: newQty } },
+      { onError: () => toast.error('Failed to update') }
+    );
+    setShowConfirmOver(null);
   }
 
   const startHold = (item) => {
@@ -370,14 +385,16 @@ export default function RunnerPicking() {
             {/* Size Items */}
             <CardContent className="p-0 divide-y divide-border">
               {group.items.map(item => {
-                const isComplete = item.picked_qty >= item.target_qty;
-                const isZero = item.target_qty > 0 && (item.picked_qty || 0) === 0;
+                const pickedQty = item.picked_qty || 0;
+                const isOver = pickedQty > item.target_qty;
+                const isComplete = pickedQty === item.target_qty;
+                const isZero = item.target_qty > 0 && pickedQty === 0;
 
                 return (
                   <div
                     key={item.id}
                     className={`p-4 flex items-center justify-between ${
-                      isComplete ? 'bg-success/5' : isZero ? 'bg-destructive/5' : ''
+                      isOver ? 'bg-amber-500/10' : isComplete ? 'bg-success/5' : isZero ? 'bg-destructive/5' : ''
                     }`}
                   >
                     <div>
@@ -409,9 +426,9 @@ export default function RunnerPicking() {
                       </Button>
 
                       <span className={`text-3xl font-bold w-12 text-center ${
-                        isComplete ? 'text-success' : isZero ? 'text-destructive' : 'text-foreground'
+                        isOver ? 'text-amber-500' : isComplete ? 'text-success' : isZero ? 'text-destructive' : 'text-foreground'
                       }`}>
-                        {item.picked_qty || 0}
+                        {pickedQty}
                       </span>
 
                       <Button
@@ -486,6 +503,42 @@ export default function RunnerPicking() {
               />
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Over-Quantity Dialog */}
+      <Dialog open={!!showConfirmOver} onOpenChange={() => setShowConfirmOver(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-500">
+              <AlertTriangle className="w-6 h-6" />
+              Exceed Required Quantity?
+            </DialogTitle>
+            <DialogDescription>
+              You are adding more than the required quantity for this item.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-center text-muted-foreground">
+            <strong className="text-foreground">{showConfirmOver?.style_name}</strong>
+            <br />
+            Size: {showConfirmOver?.size}
+            <br />
+            <span className="text-sm">
+              Required: <strong className="text-foreground">{showConfirmOver?.target_qty}</strong>
+              {' · '}Current: <strong className="text-amber-500">{showConfirmOver?.picked_qty || 0}</strong>
+            </span>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowConfirmOver(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-500 hover:bg-amber-600 text-white"
+              onClick={() => confirmOver(showConfirmOver)}
+            >
+              Add Anyway
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

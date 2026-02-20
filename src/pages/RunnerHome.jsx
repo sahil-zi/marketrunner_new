@@ -67,11 +67,17 @@ export default function RunnerHome() {
     const totalUnits = items.reduce((sum, i) => sum + (i.target_qty || 0), 0);
     const pickedUnits = items.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
 
+    const activeItems = items.filter(i => (i.target_qty || 0) > 0);
+    const completedItems = activeItems.filter(i => (i.picked_qty || 0) >= i.target_qty).length;
+    const totalItems = activeItems.length;
+
     return {
       totalStores: uniqueStores.length,
       completedStores,
       totalUnits,
       pickedUnits,
+      completedItems,
+      totalItems,
       percentage:
         uniqueStores.length > 0 ? Math.round((completedStores / uniqueStores.length) * 100) : 0,
       isComplete:
@@ -219,7 +225,13 @@ export default function RunnerHome() {
                         <div className="flex items-center gap-6">
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <Package className="w-5 h-5" />
-                            <span>{run.total_items || 0} items</span>
+                            <span>
+                              <span className={progress.completedItems === progress.totalItems && progress.totalItems > 0 ? 'text-success font-semibold' : ''}>
+                                {progress.completedItems}
+                              </span>
+                              {' / '}
+                              {progress.totalItems} items done
+                            </span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <Store className="w-5 h-5" />
