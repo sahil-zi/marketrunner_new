@@ -59,7 +59,6 @@ export default function RunnerPicking() {
   const isLoading = runLoading || itemsLoading || storesLoading;
 
   // Local UI state
-  const [isSaving, setIsSaving] = useState(false);
   const [showConfirmZero, setShowConfirmZero] = useState(null);
   const [holdProgress, setHoldProgress] = useState(0);
   const [showComplete, setShowComplete] = useState(false);
@@ -102,14 +101,12 @@ export default function RunnerPicking() {
   const progress = totalTarget > 0 ? Math.round((totalPicked / totalTarget) * 100) : 0;
   const unpickedItems = runItems.filter(i => i.target_qty > 0 && (i.picked_qty || 0) === 0);
 
-  async function updatePickedQty(item, delta) {
+  function updatePickedQty(item, delta) {
     const newQty = Math.max(0, Math.min((item.picked_qty || 0) + delta, item.target_qty + 10));
-
-    try {
-      await updateRunItem.mutateAsync({ id: item.id, data: { picked_qty: newQty } });
-    } catch (error) {
-      toast.error('Failed to update');
-    }
+    updateRunItem.mutate(
+      { id: item.id, data: { picked_qty: newQty } },
+      { onError: () => toast.error('Failed to update') }
+    );
   }
 
   const startHold = (item) => {
@@ -135,16 +132,14 @@ export default function RunnerPicking() {
     setShowConfirmZero(null);
   };
 
-  const confirmZero = async (item) => {
-    try {
-      await updateRunItem.mutateAsync({
-        id: item.id,
-        data: { picked_qty: 0, status: 'not_found' },
-      });
-      toast.success('Marked as unavailable');
-    } catch (error) {
-      toast.error('Failed to update');
-    }
+  const confirmZero = (item) => {
+    updateRunItem.mutate(
+      { id: item.id, data: { picked_qty: 0, status: 'not_found' } },
+      {
+        onSuccess: () => toast.success('Marked as unavailable'),
+        onError: () => toast.error('Failed to update'),
+      }
+    );
     setShowConfirmZero(null);
     setHoldProgress(0);
   };
@@ -408,7 +403,7 @@ export default function RunnerPicking() {
                             updatePickedQty(item, -1);
                           }
                         }}
-                        disabled={isSaving || (item.picked_qty || 0) === 0}
+                        disabled={(item.picked_qty || 0) === 0}
                       >
                         <Minus className="w-6 h-6" />
                       </Button>
@@ -425,7 +420,6 @@ export default function RunnerPicking() {
                         className="w-12 h-12 rounded-xl"
                         aria-label={`Increase quantity for ${item.style_name} size ${item.size}`}
                         onClick={() => updatePickedQty(item, 1)}
-                        disabled={isSaving}
                       >
                         <Plus className="w-6 h-6" />
                       </Button>

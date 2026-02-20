@@ -54,7 +54,22 @@ export function useUpdateRunItem() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }) => updateOne('run_items', id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runItems'] }),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['runItems'] });
+      const previousData = queryClient.getQueriesData({ queryKey: ['runItems'] });
+      queryClient.setQueriesData({ queryKey: ['runItems'] }, (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map(item => item.id === id ? { ...item, ...data } : item);
+      });
+      return { previousData };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousData) {
+        context.previousData.forEach(([queryKey, data]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
+      }
+    },
   });
 }
 
