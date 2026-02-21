@@ -18,6 +18,7 @@ import EmptyState from '@/components/admin/EmptyState';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { useRuns, useAllRunItems, useUpdateRun } from '@/hooks/use-runs';
 import { useAllRunConfirmations } from '@/hooks/use-run-confirmations';
+import { filterBy, createOne, bulkDelete } from '@/api/supabase/helpers';
 
 const container = {
   hidden: { opacity: 0 },
@@ -101,6 +102,48 @@ export default function RunnerHome() {
         id: run.id,
         data: { status: 'dropped_off', completed_at: new Date().toISOString() },
       });
+
+      // Build per-store ledger entries from run items
+      const runItems = allRunItems.filter(i => i.run_id === run.id);
+      const storeMap = {};
+      for (const item of runItems) {
+        if (!item.store_id) continue;
+        if (!storeMap[item.store_id]) {
+          storeMap[item.store_id] = {
+            store_id: item.store_id,
+            store_name: item.store_name || '',
+            pickup: 0,
+            return: 0,
+          };
+        }
+        const amount = (item.picked_qty || 0) * (item.cost_price || 0);
+        if (item.type === 'pickup') storeMap[item.store_id].pickup += amount;
+        else if (item.type === 'return') storeMap[item.store_id].return += amount;
+      }
+
+      // Delete any existing ledger entries for this run, then create one per store
+      const existingEntries = await filterBy('ledger', { run_number: run.run_number });
+      if (existingEntries.length > 0) {
+        await bulkDelete('ledger', existingEntries.map(e => e.id));
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      for (const s of Object.values(storeMap)) {
+        const net = s.pickup - s.return;
+        if (net === 0) continue;
+        const hasPickup = s.pickup > 0;
+        const hasReturn = s.return > 0;
+        await createOne('ledger', {
+          store_id: s.store_id,
+          store_name: s.store_name,
+          transaction_type: net > 0 ? 'debit' : 'credit',
+          amount: Math.abs(net),
+          date: today,
+          notes: `Run #${run.run_number} - ${hasPickup ? 'pickups' : ''}${hasPickup && hasReturn ? ' & ' : ''}${hasReturn ? 'returns' : ''}`,
+          run_number: run.run_number,
+        });
+      }
+
       toast.success('Run marked as dropped off');
     } catch {
       toast.error('Failed to update run');

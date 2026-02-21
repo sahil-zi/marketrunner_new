@@ -207,17 +207,7 @@ export default function RunnerPicking() {
         notes,
       });
 
-      if (netAmount !== 0) {
-        await createOne('ledger', {
-          store_id: storeId,
-          store_name: store?.name || '',
-          transaction_type: netAmount > 0 ? 'debit' : 'credit',
-          amount: Math.abs(netAmount),
-          date: new Date().toISOString().split('T')[0],
-          notes: `Run #${run.run_number} - ${pickupAmount > 0 ? 'pickups' : ''}${pickupAmount > 0 && returnAmount > 0 ? ' & ' : ''}${returnAmount > 0 ? 'returns' : ''}`,
-          run_number: run.run_number,
-        });
-      }
+      // Ledger entry is created when the run is fully closed (marked dropped_off), not per store.
 
       for (const item of runItems) {
         const newStatus = item.picked_qty > 0 ? (item.type === 'return' ? 'returned' : 'picked') : 'not_found';
@@ -262,7 +252,7 @@ export default function RunnerPicking() {
       queryClient.invalidateQueries({ queryKey: ['runItems'] });
       queryClient.invalidateQueries({ queryKey: ['runs'] });
 
-      toast.success(`Store confirmed - Net: AED ${netAmount.toFixed(2)}`);
+      toast.success(`Store confirmed`);
       navigate(createPageUrl(`RunnerPickStore?runId=${runId}`));
     } catch (error) {
       toast.error('Failed to complete store');

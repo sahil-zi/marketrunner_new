@@ -51,7 +51,7 @@ import PageHeader from '@/components/admin/PageHeader';
 import EmptyState from '@/components/admin/EmptyState';
 import PaginationBar from '@/components/admin/PaginationBar';
 
-import { useLedger, useCreateLedgerEntry } from '@/hooks/use-ledger';
+import { useLedger, useCreateLedgerEntry, useCleanupDuplicateLedger } from '@/hooks/use-ledger';
 import { useStores } from '@/hooks/use-stores';
 import { useAllRunConfirmations } from '@/hooks/use-run-confirmations';
 import { usePagination } from '@/hooks/use-pagination';
@@ -97,6 +97,7 @@ export default function Financials() {
 
   // --- Mutations ---
   const createEntry = useCreateLedgerEntry();
+  const cleanupDuplicates = useCleanupDuplicateLedger();
 
   // --- Derived: store balances ---
   const storeBalances = useMemo(() => {
@@ -257,6 +258,26 @@ export default function Financials() {
         title="Financials"
         subtitle="Track store balances and transactions"
       >
+        <Button
+          variant="outline"
+          onClick={() =>
+            cleanupDuplicates.mutate(undefined, {
+              onSuccess: (count) =>
+                count > 0
+                  ? toast.success(`Removed ${count} duplicate ledger entries`)
+                  : toast.info('No duplicate entries found'),
+              onError: () => toast.error('Cleanup failed'),
+            })
+          }
+          disabled={cleanupDuplicates.isPending}
+        >
+          {cleanupDuplicates.isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Receipt className="w-4 h-4 mr-2" />
+          )}
+          Fix Duplicates
+        </Button>
         <Button onClick={() => setShowAddDialog(true)}>
           <Plus className="w-4 h-4 mr-2" />
           Add Transaction

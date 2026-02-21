@@ -13,14 +13,24 @@ import {
   MapPin,
   Search,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import StatusBadge from '@/components/admin/StatusBadge';
 import EmptyState from '@/components/admin/EmptyState';
 import { useRunById, useRunItems } from '@/hooks/use-runs';
-import { useRunConfirmations } from '@/hooks/use-run-confirmations';
+import { useRunConfirmations, useDeleteRunConfirmation } from '@/hooks/use-run-confirmations';
 import { useStores } from '@/hooks/use-stores';
+import { toast } from 'sonner';
 
 const container = {
   hidden: { opacity: 0 },
@@ -39,6 +49,8 @@ export default function RunnerPickStore() {
   const navigate = useNavigate();
   const [barcodeQuery, setBarcodeQuery] = useState('');
   const searchRef = useRef(null);
+  const [reopenTarget, setReopenTarget] = useState(null); // { store, confirmation }
+  const deleteConfirmation = useDeleteRunConfirmation();
 
   const urlParams = new URLSearchParams(window.location.search);
   const runId = urlParams.get('runId');
@@ -111,6 +123,27 @@ export default function RunnerPickStore() {
     if (e.key === 'Enter' && searchResults?.length === 1) {
       navigate(createPageUrl(`RunnerPicking?runId=${runId}&storeId=${searchResults[0].store_id}`));
     }
+  }
+
+  function handleStoreClick(store) {
+    if (store.isConfirmed) {
+      const confirmation = confirmations.find(c => c.store_id === store.storeId);
+      setReopenTarget({ store, confirmation });
+    } else {
+      navigate(createPageUrl(`RunnerPicking?runId=${runId}&storeId=${store.storeId}`));
+    }
+  }
+
+  function confirmReopen() {
+    if (!reopenTarget?.confirmation) return;
+    deleteConfirmation.mutate(reopenTarget.confirmation.id, {
+      onSuccess: () => {
+        toast.success(`${reopenTarget.store.storeName} reopened`);
+        navigate(createPageUrl(`RunnerPicking?runId=${runId}&storeId=${reopenTarget.store.storeId}`));
+        setReopenTarget(null);
+      },
+      onError: () => toast.error('Failed to reopen store'),
+    });
   }
 
   if (isLoading) {
@@ -278,11 +311,7 @@ export default function RunnerPickStore() {
 
             return (
               <motion.div key={store.storeId} variants={item}>
-                <Link
-                  to={createPageUrl(
-                    `RunnerPicking?runId=${runId}&storeId=${store.storeId}`
-                  )}
-                >
+                <div onClick={() => handleStoreClick(store)} className="cursor-pointer">
                   <Card
                     className={`transition-all active:scale-[0.98] bg-card border-border ${
                       store.isConfirmed
@@ -320,7 +349,10 @@ export default function RunnerPickStore() {
                         </div>
 
                         {store.isConfirmed ? (
-                          <StatusBadge status="completed" />
+                          <div className="flex items-center gap-2 mt-1">
+                            <StatusBadge status="completed" />
+                            <RefreshCw className="w-4 h-4 text-muted-foreground" />
+                          </div>
                         ) : (
                           <ArrowRight className="w-6 h-6 text-muted-foreground mt-2" />
                         )}
@@ -352,12 +384,44 @@ export default function RunnerPickStore() {
                       )}
                     </CardContent>
                   </Card>
-                </Link>
+                </div>
               </motion.div>
             );
           })}
         </motion.div>
       ))}
+
+      {/* Reopen Store Dialog */}
+      <Dialog open={!!reopenTarget} onOpenChange={() => setReopenTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-warning" />
+              Reopen Store?
+            </DialogTitle>
+            <DialogDescription>
+              <strong>{reopenTarget?.store?.storeName}</strong> is already marked as completed.
+              Reopening it will allow you to edit quantities and close it again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setReopenTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmReopen}
+              disabled={deleteConfirmation.isPending}
+            >
+              {deleteConfirmation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Reopen & Edit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

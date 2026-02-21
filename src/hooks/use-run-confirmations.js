@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listAll, filterBy, createOne } from '@/api/supabase/helpers';
+import { listAll, filterBy, createOne, deleteOne } from '@/api/supabase/helpers';
 
 export function useRunConfirmations(runId) {
   return useQuery({
@@ -20,6 +20,14 @@ export function useCreateRunConfirmation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data) => createOne('run_confirmations', data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runConfirmations'] }),
+  });
+}
+
+export function useDeleteRunConfirmation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => deleteOne('run_confirmations', id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runConfirmations'] }),
   });
 }
