@@ -52,6 +52,7 @@ import EmptyState from '@/components/admin/EmptyState';
 import PaginationBar from '@/components/admin/PaginationBar';
 
 import { useLedger, useCreateLedgerEntry, useCleanupDuplicateLedger } from '@/hooks/use-ledger';
+import { listAll } from '@/api/supabase/helpers';
 import { useStores } from '@/hooks/use-stores';
 import { useAllRunConfirmations } from '@/hooks/use-run-confirmations';
 import { usePagination } from '@/hooks/use-pagination';
@@ -75,6 +76,7 @@ const DEFAULT_FORM = {
   store_id: '',
   transaction_type: 'credit',
   amount: '',
+  discount: '',
   date: new Date().toISOString().split('T')[0],
   notes: '',
 };
@@ -94,6 +96,7 @@ export default function Financials() {
   const [filterDateTo, setFilterDateTo] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [formData, setFormData] = useState(DEFAULT_FORM);
+  const [isExporting, setIsExporting] = useState(false);
 
   // --- Mutations ---
   const createEntry = useCreateLedgerEntry();
@@ -121,15 +124,18 @@ export default function Financials() {
           storeName: entry.store_name || 'Unknown',
           debits: 0,
           credits: 0,
+          discounts: 0,
           balance: 0,
         };
       }
 
+      const net = (entry.amount || 0) - (entry.discount || 0);
       if (entry.transaction_type === 'debit') {
-        balances[storeId].debits += entry.amount || 0;
+        balances[storeId].debits += net;
       } else {
-        balances[storeId].credits += entry.amount || 0;
+        balances[storeId].credits += net;
       }
+      balances[storeId].discounts += entry.discount || 0;
       balances[storeId].balance =
         balances[storeId].credits - balances[storeId].debits;
     });
@@ -192,6 +198,7 @@ export default function Financials() {
         store_name: store?.name || '',
         transaction_type: formData.transaction_type,
         amount: parseFloat(formData.amount),
+        discount: formData.discount ? parseFloat(formData.discount) : 0,
         date: formData.date,
         notes: formData.notes,
       },
@@ -214,20 +221,27 @@ export default function Financials() {
       'Date',
       'Store',
       'Type',
-      'Amount',
+      'Amount (AED)',
+      'Discount (AED)',
+      'Net (AED)',
       'Run #',
       'Notes',
       'Receipt URL',
     ];
-    const rows = filteredLedger.map((entry) => [
-      entry.date,
-      entry.store_name,
-      entry.transaction_type,
-      entry.amount?.toFixed(2),
-      entry.run_number || '',
-      (entry.notes || '').replace(/,/g, ';'),
-      getConfirmation(entry.run_confirmation_id)?.receipt_image_url || '',
-    ]);
+    const rows = filteredLedger.map((entry) => {
+      const net = (entry.amount || 0) - (entry.discount || 0);
+      return [
+        entry.date,
+        entry.store_name,
+        entry.transaction_type,
+        (entry.amount || 0).toFixed(2),
+        (entry.discount || 0).toFixed(2),
+        net.toFixed(2),
+        entry.run_number || '',
+        (entry.notes || '').replace(/,/g, ';'),
+        getConfirmation(entry.run_confirmation_id)?.receipt_image_url || '',
+      ];
+    });
 
     const csvContent = [headers, ...rows]
       .map((e) => e.map((cell) => `"${cell}"`).join(','))
@@ -244,6 +258,87 @@ export default function Financials() {
     link.click();
     document.body.removeChild(link);
     toast.success('Ledger exported successfully');
+  }
+
+  // --- Store report: item-level rows with ledger payment columns ---
+  async function exportStoreReport() {
+    setIsExporting(true);
+    try {
+      const [allRunItems, allRuns] = await Promise.all([
+        listAll('run_items'),
+        listAll('runs'),
+      ]);
+
+      // map run_id → run_number
+      const runNumberMap = {};
+      allRuns.forEach(r => { runNumberMap[r.id] = r.run_number; });
+
+      // map run_number+store_id → ledger entry
+      const ledgerMap = {};
+      ledger.forEach(entry => {
+        if (entry.run_number && entry.store_id) {
+          ledgerMap[`${entry.run_number}-${entry.store_id}`] = entry;
+        }
+      });
+
+      // Apply current store filter
+      const items = filterStore === 'all'
+        ? allRunItems
+        : allRunItems.filter(i => i.store_id === filterStore);
+
+      const headers = [
+        'Date', 'Store', 'Run #', 'Type', 'Style', 'Size', 'Barcode',
+        'Target Qty', 'Picked Qty', 'Unit Price (AED)', 'Item Total (AED)',
+        'Transaction Type', 'Debit (AED)', 'Credit (AED)', 'Discount (AED)',
+      ];
+
+      const rows = items.map(item => {
+        const runNumber = runNumberMap[item.run_id] || '';
+        const ledgerEntry = runNumber
+          ? ledgerMap[`${runNumber}-${item.store_id}`]
+          : null;
+        const net = ledgerEntry
+          ? (ledgerEntry.amount || 0) - (ledgerEntry.discount || 0)
+          : 0;
+        const isDebit = ledgerEntry?.transaction_type === 'debit';
+
+        return [
+          ledgerEntry?.date || '',
+          item.store_name || '',
+          runNumber,
+          item.type || '',
+          (item.style_name || '').replace(/,/g, ';'),
+          item.size || '',
+          item.barcode || '',
+          item.target_qty ?? '',
+          item.picked_qty ?? '',
+          (item.cost_price || 0).toFixed(2),
+          ((item.picked_qty || 0) * (item.cost_price || 0)).toFixed(2),
+          ledgerEntry?.transaction_type || '',
+          isDebit ? net.toFixed(2) : '0.00',
+          !isDebit && ledgerEntry ? net.toFixed(2) : '0.00',
+          (ledgerEntry?.discount || 0).toFixed(2),
+        ];
+      });
+
+      const csvContent = [headers, ...rows]
+        .map(row => row.map(cell => `"${cell}"`).join(','))
+        .join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute('download', `store_report_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Store report exported');
+    } catch (e) {
+      toast.error('Export failed');
+      console.error(e);
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   // --- Filtered store balances for the balances tab ---
@@ -575,14 +670,26 @@ export default function Financials() {
           </Card>
 
           {/* Export */}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={exportStoreReport}
+              disabled={isExporting || ledger.length === 0}
+            >
+              {isExporting ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4 mr-2" />
+              )}
+              Store Report
+            </Button>
             <Button
               variant="outline"
               onClick={exportToCSV}
               disabled={filteredLedger.length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
-              Export to CSV
+              Export Ledger
             </Button>
           </div>
 
@@ -608,6 +715,8 @@ export default function Financials() {
                         <TableHead>Store</TableHead>
                         <TableHead>Type</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="text-right">Discount</TableHead>
+                        <TableHead className="text-right">Net</TableHead>
                         <TableHead>Run #</TableHead>
                         <TableHead>Notes</TableHead>
                         <TableHead>Receipt</TableHead>
@@ -644,6 +753,12 @@ export default function Financials() {
                                 {entry.transaction_type}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-right font-medium text-muted-foreground">
+                              AED {(entry.amount || 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium text-amber-500">
+                              {entry.discount ? `AED ${entry.discount.toFixed(2)}` : '—'}
+                            </TableCell>
                             <TableCell
                               className={cn(
                                 'text-right font-medium',
@@ -652,7 +767,7 @@ export default function Financials() {
                                   : 'text-destructive'
                               )}
                             >
-                              AED {entry.amount?.toFixed(2)}
+                              AED {((entry.amount || 0) - (entry.discount || 0)).toFixed(2)}
                             </TableCell>
                             <TableCell>
                               {entry.run_number
@@ -756,18 +871,33 @@ export default function Financials() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label htmlFor="amount">Amount *</Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                value={formData.amount}
-                onChange={(e) =>
-                  setFormData({ ...formData, amount: e.target.value })
-                }
-                placeholder="0.00"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="amount">Amount (AED) *</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  value={formData.amount}
+                  onChange={(e) =>
+                    setFormData({ ...formData, amount: e.target.value })
+                  }
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <Label htmlFor="discount">Discount (AED)</Label>
+                <Input
+                  id="discount"
+                  type="number"
+                  step="0.01"
+                  value={formData.discount}
+                  onChange={(e) =>
+                    setFormData({ ...formData, discount: e.target.value })
+                  }
+                  placeholder="0.00"
+                />
+              </div>
             </div>
             <div>
               <Label htmlFor="date">Date *</Label>

@@ -87,7 +87,7 @@ export default function RunDetails() {
       totalTarget,
       totalPicked,
       percentage: totalTarget > 0 ? Math.round((totalPicked / totalTarget) * 100) : 0,
-      completedStores: confirmations.length,
+      completedStores: new Set(confirmations.map(c => c.store_id)).size,
       totalStores: itemsByStore.length,
     };
   }, [runItems, confirmations, itemsByStore]);
