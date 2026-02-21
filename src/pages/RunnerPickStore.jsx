@@ -98,19 +98,18 @@ export default function RunnerPickStore() {
   const totalPicked = runItems.reduce((sum, i) => sum + (i.picked_qty || 0), 0);
   const totalTarget = runItems.reduce((sum, i) => sum + (i.target_qty || 0), 0);
 
-  const displayedStores = useMemo(() => {
-    const q = barcodeQuery.trim();
-    if (!q) return sortedStores;
-    return sortedStores.filter(store =>
-      store.items.some(item => item.barcode?.toLowerCase() === q.toLowerCase())
+  const searchResults = useMemo(() => {
+    const q = barcodeQuery.trim().toLowerCase();
+    if (!q) return null;
+    return runItems.filter(item =>
+      item.barcode?.toLowerCase().includes(q) ||
+      item.sku?.toLowerCase().includes(q)
     );
-  }, [sortedStores, barcodeQuery]);
+  }, [runItems, barcodeQuery]);
 
   function handleBarcodeKeyDown(e) {
-    if (e.key === 'Enter') {
-      if (displayedStores.length === 1) {
-        navigate(createPageUrl(`RunnerPicking?runId=${runId}&storeId=${displayedStores[0].storeId}`));
-      }
+    if (e.key === 'Enter' && searchResults?.length === 1) {
+      navigate(createPageUrl(`RunnerPicking?runId=${runId}&storeId=${searchResults[0].store_id}`));
     }
   }
 
@@ -181,13 +180,13 @@ export default function RunnerPickStore() {
           )}
         </div>
 
-        {barcodeQuery && (
+        {barcodeQuery && searchResults && (
           <p className="text-xs text-muted-foreground px-1">
-            {displayedStores.length === 0
-              ? 'No stores found with this barcode'
-              : displayedStores.length === 1
-              ? 'Press Enter to open matching store'
-              : `${displayedStores.length} stores contain this barcode`}
+            {searchResults.length === 0
+              ? 'No items found'
+              : searchResults.length === 1
+              ? 'Press Enter to open store'
+              : `${searchResults.length} items found`}
           </p>
         )}
 
@@ -201,8 +200,62 @@ export default function RunnerPickStore() {
         </div>
       </div>
 
+      {/* Search Results — item level */}
+      {searchResults && (
+        <div className="p-4 space-y-3">
+          {searchResults.length === 0 ? (
+            <EmptyState
+              icon={Search}
+              title="No items found"
+              description="No items in this run match that barcode or SKU."
+            />
+          ) : (
+            searchResults.map(result => {
+              const pickedQty = result.picked_qty || 0;
+              const isOver = pickedQty > result.target_qty;
+              const isComplete = pickedQty >= result.target_qty;
+              return (
+                <Link
+                  key={result.id}
+                  to={createPageUrl(`RunnerPicking?runId=${runId}&storeId=${result.store_id}`)}
+                >
+                  <Card className="transition-all active:scale-[0.98] hover:border-primary/40">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-foreground truncate">{result.style_name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Size {result.size || 'N/A'} &middot; {result.barcode || result.sku}
+                          </p>
+                          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <StoreIcon className="w-3 h-3 shrink-0" />
+                            {result.store_name}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-2xl font-bold ${
+                            isOver ? 'text-amber-500' : isComplete ? 'text-success' : 'text-foreground'
+                          }`}>
+                            {pickedQty}
+                          </p>
+                          <p className="text-xs text-muted-foreground">of {result.target_qty}</p>
+                          {result.type === 'return' && (
+                            <span className="text-xs text-purple-400 font-medium">Return</span>
+                          )}
+                        </div>
+                        <ArrowRight className="w-5 h-5 text-muted-foreground shrink-0" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
+            })
+          )}
+        </div>
+      )}
+
       {/* Store List */}
-      {displayedStores.length === 0 ? (
+      {!searchResults && (sortedStores.length === 0 ? (
         <div className="p-4">
           <EmptyState
             icon={StoreIcon}
@@ -217,7 +270,7 @@ export default function RunnerPickStore() {
           initial="hidden"
           animate="show"
         >
-          {displayedStores.map((store) => {
+          {sortedStores.map((store) => {
             const storeProgress =
               store.totalTarget > 0
                 ? Math.round((store.totalPicked / store.totalTarget) * 100)
@@ -304,7 +357,7 @@ export default function RunnerPickStore() {
             );
           })}
         </motion.div>
-      )}
+      ))}
     </div>
   );
 }
