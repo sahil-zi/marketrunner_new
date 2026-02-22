@@ -103,7 +103,15 @@ export default function RunnerHome() {
         data: { status: 'dropped_off', completed_at: new Date().toISOString() },
       });
 
-      // Build per-store ledger entries from run items
+      toast.success('Run marked as dropped off');
+    } catch (err) {
+      console.error('Failed to mark run as dropped off:', err);
+      toast.error('Failed to update run');
+      return;
+    }
+
+    // Build per-store ledger entries from run items (best-effort, after status update)
+    try {
       const runItems = allRunItems.filter(i => i.run_id === run.id);
       const storeMap = {};
       for (const item of runItems) {
@@ -143,10 +151,8 @@ export default function RunnerHome() {
           run_number: run.run_number,
         });
       }
-
-      toast.success('Run marked as dropped off');
-    } catch {
-      toast.error('Failed to update run');
+    } catch (err) {
+      console.error('Failed to write ledger entries for run:', err);
     }
   };
 
