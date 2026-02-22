@@ -178,14 +178,20 @@ export default function RunnerPicking() {
   };
 
   async function completeStore() {
-    if (!receiptImage) {
+    const nothingPicked = totalPicked === 0;
+
+    if (!nothingPicked && !receiptImage) {
       toast.error('Please upload a receipt photo');
       return;
     }
 
     setIsUploading(true);
     try {
-      const { file_url } = await uploadFile('receipts', receiptImage);
+      let file_url = null;
+      if (!nothingPicked && receiptImage) {
+        const result = await uploadFile('receipts', receiptImage);
+        file_url = result.file_url;
+      }
 
       const pickupAmount = runItems
         .filter(item => item.type === 'pickup')
@@ -566,51 +572,57 @@ export default function RunnerPicking() {
               </div>
             </div>
 
-            {/* Receipt Upload */}
-            <div>
-              <p className="font-medium text-foreground mb-2">Upload Receipt Photo *</p>
-              <input
-                type="file"
-                accept="image/jpeg,image/png"
-                onChange={handleImageSelect}
-                ref={fileInputRef}
-                className="hidden"
-              />
+            {/* Receipt Upload - only required when items were picked */}
+            {totalPicked > 0 ? (
+              <div>
+                <p className="font-medium text-foreground mb-2">Upload Receipt Photo *</p>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  onChange={handleImageSelect}
+                  ref={fileInputRef}
+                  className="hidden"
+                />
 
-              {receiptPreview ? (
-                <div className="relative">
-                  <img
-                    src={receiptPreview}
-                    alt="Receipt"
-                    className="w-full h-48 object-cover rounded-xl"
-                  />
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="absolute top-2 right-2"
-                    aria-label="Remove receipt image"
-                    onClick={() => {
-                      setReceiptImage(null);
-                      setReceiptPreview(null);
-                    }}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  className="w-full h-32 border-dashed border-border"
-                  aria-label="Upload receipt photo"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <div className="text-center">
-                    <Camera className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                    <span className="text-muted-foreground">Take Photo or Upload</span>
+                {receiptPreview ? (
+                  <div className="relative">
+                    <img
+                      src={receiptPreview}
+                      alt="Receipt"
+                      className="w-full h-48 object-cover rounded-xl"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="absolute top-2 right-2"
+                      aria-label="Remove receipt image"
+                      onClick={() => {
+                        setReceiptImage(null);
+                        setReceiptPreview(null);
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
                   </div>
-                </Button>
-              )}
-            </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="w-full h-32 border-dashed border-border"
+                    aria-label="Upload receipt photo"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <div className="text-center">
+                      <Camera className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <span className="text-muted-foreground">Take Photo or Upload</span>
+                    </div>
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="bg-muted rounded-xl p-4 text-sm text-muted-foreground text-center">
+                No items were picked — no receipt required.
+              </div>
+            )}
 
             {/* Notes */}
             <div>
@@ -629,7 +641,7 @@ export default function RunnerPicking() {
             </Button>
             <Button
               onClick={completeStore}
-              disabled={isUploading || !receiptImage}
+              disabled={isUploading || (totalPicked > 0 && !receiptImage)}
               aria-label="Confirm and submit store completion"
             >
               {isUploading ? (

@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { motion } from 'framer-motion';
 import {
@@ -34,27 +34,35 @@ const item = {
 };
 
 export default function RunnerHome() {
+  const navigate = useNavigate();
   const { data: user, isLoading: userLoading } = useCurrentUser();
   const { data: allRuns = [], isLoading: runsLoading, refetch: refetchRuns } = useRuns();
   const { data: allRunItems = [], isLoading: itemsLoading, refetch: refetchItems } = useAllRunItems();
   const { data: allConfirmations = [], isLoading: confirmationsLoading, refetch: refetchConfirmations } = useAllRunConfirmations();
   const updateRun = useUpdateRun();
+  const [activeTab, setActiveTab] = useState('active');
 
   const isLoading = userLoading || runsLoading || itemsLoading || confirmationsLoading;
 
-  // Filter runs for this runner that are active or recently completed
-  const runs = useMemo(() => {
+  // My runs = assigned to me or unassigned
+  const myRuns = useMemo(() => {
     if (!user || !allRuns.length) return [];
-    return allRuns.filter((r) => {
-      const isAssignedToMe = !r.runner_id || r.runner_id === user.id;
-      const isActiveOrRecent =
-        r.status === 'active' ||
-        (r.status === 'completed' &&
-          r.completed_at &&
-          Date.now() - new Date(r.completed_at).getTime() < 24 * 60 * 60 * 1000);
-      return isAssignedToMe && isActiveOrRecent;
-    });
+    return allRuns.filter(r => !r.runner_id || r.runner_id === user.id);
   }, [allRuns, user]);
+
+  // Active tab: status 'active', sorted FIFO (lowest run_number first)
+  const activeRuns = useMemo(() => {
+    return [...myRuns.filter(r => r.status === 'active')]
+      .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
+  }, [myRuns]);
+
+  // Completed tab: status 'completed' or 'dropped_off', newest completed_at first
+  const completedRuns = useMemo(() => {
+    return [...myRuns.filter(r => r.status === 'completed' || r.status === 'dropped_off')]
+      .sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
+  }, [myRuns]);
+
+  const displayRuns = activeTab === 'active' ? activeRuns : completedRuns;
 
   // Calculate run progress
   const getRunProgress = (runId, run) => {
@@ -95,7 +103,6 @@ export default function RunnerHome() {
   };
 
   const handleMarkDroppedOff = async (e, run) => {
-    e.preventDefault();
     e.stopPropagation();
     try {
       await updateRun.mutateAsync({
@@ -182,12 +189,36 @@ export default function RunnerHome() {
         </Button>
       </div>
 
-      {/* Active Runs */}
-      {runs.length === 0 ? (
+      {/* Tabs */}
+      <div className="flex bg-muted p-1 rounded-xl">
+        <button
+          onClick={() => setActiveTab('active')}
+          className={`flex-1 py-2 px-4 text-sm font-medium rounded-lg transition-all ${
+            activeTab === 'active'
+              ? 'bg-background shadow-sm text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Active{activeRuns.length > 0 ? ` (${activeRuns.length})` : ''}
+        </button>
+        <button
+          onClick={() => setActiveTab('completed')}
+          className={`flex-1 py-2 px-4 text-sm font-medium rounded-lg transition-all ${
+            activeTab === 'completed'
+              ? 'bg-background shadow-sm text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Completed{completedRuns.length > 0 ? ` (${completedRuns.length})` : ''}
+        </button>
+      </div>
+
+      {/* Runs List */}
+      {displayRuns.length === 0 ? (
         <EmptyState
           icon={Truck}
-          title="No Active Runs"
-          description="Check back later for new runs"
+          title={activeTab === 'active' ? 'No Active Runs' : 'No Completed Runs'}
+          description={activeTab === 'active' ? 'Check back later for new runs' : 'Completed runs will appear here'}
         />
       ) : (
         <motion.div
@@ -196,13 +227,18 @@ export default function RunnerHome() {
           initial="hidden"
           animate="show"
         >
-          {runs.map((run) => {
+          {displayRuns.map((run) => {
             const progress = getRunProgress(run.id, run);
             const isComplete = progress.isComplete;
+            const canMarkDroppedOff = isComplete && run.status !== 'dropped_off';
 
             return (
               <motion.div key={run.id} variants={item}>
-                <Link to={createPageUrl(`RunnerPickStore?runId=${run.id}`)}>
+                {/* Use div + navigate so the Mark Dropped Off button's stopPropagation works reliably */}
+                <div
+                  className="cursor-pointer"
+                  onClick={() => navigate(createPageUrl(`RunnerPickStore?runId=${run.id}`))}
+                >
                   <Card
                     className={`transition-all active:scale-[0.98] bg-card border-border ${
                       isComplete
@@ -287,7 +323,7 @@ export default function RunnerHome() {
                             <span>{run.total_stores || 0} stores</span>
                           </div>
                         </div>
-                        {isComplete && run.status !== 'dropped_off' && (
+                        {canMarkDroppedOff && (
                           <Button
                             size="sm"
                             onClick={(e) => handleMarkDroppedOff(e, run)}
@@ -302,7 +338,7 @@ export default function RunnerHome() {
                       </div>
                     </CardContent>
                   </Card>
-                </Link>
+                </div>
               </motion.div>
             );
           })}
