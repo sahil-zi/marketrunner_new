@@ -84,12 +84,20 @@ const AuthenticatedApp = () => {
     return <Navigate to="/Login" replace />;
   }
 
-  // Role-based redirect: store owners can only access store pages
   const { user } = useAuth();
+
+  // Role-based redirect: store owners can only access store pages
   const storePages = ['/StoreOrders', '/StoreLogin'];
   const isStorePage = storePages.some(p => location.pathname.startsWith(p));
   if (isAuthenticated && user?.role === 'store_owner' && !isStorePage) {
     return <Navigate to="/StoreOrders" replace />;
+  }
+
+  // Role-based redirect: runners (role 'user') can only access runner pages
+  const runnerPages = ['/RunnerHome', '/RunnerPickStore', '/RunnerPicking', '/RunnerLogin'];
+  const isRunnerPage = runnerPages.some(p => location.pathname.startsWith(p));
+  if (isAuthenticated && user?.role === 'user' && !isRunnerPage && !isPublicPath) {
+    return <Navigate to="/RunnerHome" replace />;
   }
 
   return <AnimatedRoutes />;

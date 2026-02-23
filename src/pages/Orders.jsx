@@ -13,9 +13,12 @@ import {
   Download,
   MoreHorizontal,
   XCircle,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -41,6 +44,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
 import PageHeader from '@/components/admin/PageHeader';
@@ -107,6 +117,93 @@ export default function Orders() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
+
+  /* ---- New Order dialog state ----------------------------------- */
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [newOrderPlatform, setNewOrderPlatform] = useState('');
+  const [newOrderId, setNewOrderId] = useState('');
+  const [newOrderDate, setNewOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newOrderItems, setNewOrderItems] = useState([{ barcode: '', quantity: 1 }]);
+  const [newOrderSaving, setNewOrderSaving] = useState(false);
+
+  function openNewOrderDialog() {
+    setNewOrderPlatform('');
+    setNewOrderId('');
+    setNewOrderDate(new Date().toISOString().split('T')[0]);
+    setNewOrderItems([{ barcode: '', quantity: 1 }]);
+    setNewOrderOpen(true);
+  }
+
+  function addItemRow() {
+    setNewOrderItems((prev) => [...prev, { barcode: '', quantity: 1 }]);
+  }
+
+  function removeItemRow(idx) {
+    setNewOrderItems((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateItemRow(idx, field, value) {
+    setNewOrderItems((prev) =>
+      prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row))
+    );
+  }
+
+  async function handleCreateOrder(e) {
+    e.preventDefault();
+    const platform = newOrderPlatform.trim();
+    const orderId = newOrderId.trim();
+    if (!platform) { toast.error('Platform name is required'); return; }
+    if (!orderId) { toast.error('Order ID is required'); return; }
+
+    const validItems = newOrderItems.filter((r) => r.barcode.trim());
+    if (validItems.length === 0) { toast.error('Add at least one item with a barcode'); return; }
+
+    // Validate barcodes
+    const knownBarcodes = new Set(products.map((p) => p.barcode));
+    const unknownBarcodes = [...new Set(validItems.map((r) => r.barcode.trim()).filter((b) => !knownBarcodes.has(b)))];
+    if (unknownBarcodes.length > 0) {
+      toast.error(`Unknown barcode(s): ${unknownBarcodes.join(', ')}`);
+      return;
+    }
+
+    // Check for duplicate order
+    const existingOrder = orders.find(
+      (o) => o.platform_name === platform && o.platform_order_id === orderId
+    );
+    if (existingOrder) {
+      const items = orderItems.filter((i) => i.order_id === existingOrder.id);
+      if (items.length > 0 && !items.every((i) => i.status === 'cancelled')) {
+        toast.error(`Order ${orderId} already exists for ${platform}`);
+        return;
+      }
+    }
+
+    setNewOrderSaving(true);
+    try {
+      const newOrder = await createOne('orders', {
+        platform_name: platform,
+        platform_order_id: orderId,
+        order_timestamp: new Date(newOrderDate).toISOString(),
+      });
+
+      await bulkInsert('order_items', validItems.map((r) => ({
+        order_id: newOrder.id,
+        barcode: r.barcode.trim(),
+        quantity: Math.max(1, parseInt(r.quantity) || 1),
+        status: 'pending',
+      })));
+
+      toast.success(`Order ${orderId} created with ${validItems.length} item${validItems.length !== 1 ? 's' : ''}`);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+      setNewOrderOpen(false);
+    } catch (err) {
+      console.error('Failed to create order:', err);
+      toast.error('Failed to create order');
+    } finally {
+      setNewOrderSaving(false);
+    }
+  }
 
   /* ---- Derived data --------------------------------------------- */
   const platforms = useMemo(
@@ -453,7 +550,106 @@ export default function Orders() {
       <PageHeader
         title="Orders"
         subtitle="Manage incoming orders from marketplaces"
-      />
+      >
+        <Button onClick={openNewOrderDialog}>
+          <Plus className="mr-2 h-4 w-4" />
+          New Order
+        </Button>
+      </PageHeader>
+
+      {/* ---- New Order Dialog ------------------------------------ */}
+      <Dialog open={newOrderOpen} onOpenChange={setNewOrderOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New Order</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateOrder} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="new-order-platform">Platform</Label>
+                <Input
+                  id="new-order-platform"
+                  list="platform-suggestions"
+                  value={newOrderPlatform}
+                  onChange={(e) => setNewOrderPlatform(e.target.value)}
+                  placeholder="e.g. Amazon"
+                  required
+                />
+                <datalist id="platform-suggestions">
+                  {platforms.map((p) => <option key={p} value={p} />)}
+                </datalist>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="new-order-id">Order ID</Label>
+                <Input
+                  id="new-order-id"
+                  value={newOrderId}
+                  onChange={(e) => setNewOrderId(e.target.value)}
+                  placeholder="e.g. AMZ-12345"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="new-order-date">Order Date</Label>
+              <Input
+                id="new-order-date"
+                type="date"
+                value={newOrderDate}
+                onChange={(e) => setNewOrderDate(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Items</Label>
+              {newOrderItems.map((row, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    placeholder="Barcode"
+                    value={row.barcode}
+                    onChange={(e) => updateItemRow(idx, 'barcode', e.target.value)}
+                    className="flex-1"
+                  />
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="Qty"
+                    value={row.quantity}
+                    onChange={(e) => updateItemRow(idx, 'quantity', e.target.value)}
+                    className="w-20"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeItemRow(idx)}
+                    disabled={newOrderItems.length === 1}
+                    aria-label="Remove item"
+                  >
+                    <Trash2 className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={addItemRow} className="w-full">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Item
+              </Button>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setNewOrderOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={newOrderSaving}>
+                {newOrderSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create Order
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Tabs defaultValue="browse" className="space-y-6">
         <TabsList>

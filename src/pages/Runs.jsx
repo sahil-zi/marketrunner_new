@@ -436,10 +436,10 @@ export default function Runs() {
   async function cancelRuns() {
     setIsCancelling(true);
     try {
-      const { data } = await cancelRunsMutation.mutateAsync(selectedRuns);
+      const result = await cancelRunsMutation.mutateAsync(selectedRuns);
 
-      const completed = data.results.filter((r) => r.status === 'completed').length;
-      const cancelled = data.results.filter((r) => r.status === 'cancelled').length;
+      const completed = result.results.filter((r) => r.status === 'completed').length;
+      const cancelled = result.results.filter((r) => r.status === 'cancelled').length;
 
       if (completed > 0 && cancelled > 0) {
         toast.success(`${completed} run(s) completed with picked items, ${cancelled} fully cancelled`);

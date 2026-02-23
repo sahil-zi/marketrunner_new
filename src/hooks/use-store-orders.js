@@ -42,14 +42,22 @@ export function useStoreOrderItems(storeId) {
         .in('id', orderIds);
 
       if (ordersError) throw ordersError;
-      const orderMap = Object.fromEntries((orders || []).map((o) => [o.id, o]));
 
-      // Combine everything
-      return items.map((item) => ({
-        ...item,
-        product: productMap[item.barcode] || null,
-        order: orderMap[item.order_id] || null,
-      }));
+      // Exclude test marketplace orders (case-insensitive)
+      const filteredOrders = (orders || []).filter(
+        (o) => o.platform_name?.toLowerCase() !== 'test'
+      );
+      const orderMap = Object.fromEntries(filteredOrders.map((o) => [o.id, o]));
+      const validOrderIds = new Set(filteredOrders.map((o) => o.id));
+
+      // Combine everything, dropping items that belong to excluded orders
+      return items
+        .filter((item) => validOrderIds.has(item.order_id))
+        .map((item) => ({
+          ...item,
+          product: productMap[item.barcode] || null,
+          order: orderMap[item.order_id] || null,
+        }));
     },
     enabled: !!storeId,
     refetchInterval: 30000, // fallback polling every 30s

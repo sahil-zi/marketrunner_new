@@ -15,13 +15,16 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (!isAuthenticated || !user) return;
+    if (user.role === 'user') {
+      navigate('/RunnerHome');
+    } else {
       navigate('/');
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, user, navigate]);
 
   async function handleSubmit(e) {
     e.preventDefault();
