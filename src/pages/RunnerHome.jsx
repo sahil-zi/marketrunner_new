@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { motion } from 'framer-motion';
 import {
@@ -16,8 +17,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import StatusBadge from '@/components/admin/StatusBadge';
 import EmptyState from '@/components/admin/EmptyState';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { useRuns, useAllRunItems, useUpdateRun } from '@/hooks/use-runs';
+import { useRuns, useAllRunItems } from '@/hooks/use-runs';
 import { useAllRunConfirmations } from '@/hooks/use-run-confirmations';
+import { supabase } from '@/api/supabaseClient';
 import { filterBy, createOne, bulkDelete } from '@/api/supabase/helpers';
 
 const container = {
@@ -35,12 +37,13 @@ const item = {
 
 export default function RunnerHome() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: user, isLoading: userLoading } = useCurrentUser();
   const { data: allRuns = [], isLoading: runsLoading, refetch: refetchRuns } = useRuns();
   const { data: allRunItems = [], isLoading: itemsLoading, refetch: refetchItems } = useAllRunItems();
   const { data: allConfirmations = [], isLoading: confirmationsLoading, refetch: refetchConfirmations } = useAllRunConfirmations();
-  const updateRun = useUpdateRun();
-  const [activeTab, setActiveTab] = useState('active');
+  const [activeTab, setActiveTab] = useState('new');
+  const [droppingOff, setDroppingOff] = useState(null); // runId being dropped off
 
   const isLoading = userLoading || runsLoading || itemsLoading || confirmationsLoading;
 
@@ -50,11 +53,25 @@ export default function RunnerHome() {
     return allRuns.filter(r => !r.runner_id || r.runner_id === user.id);
   }, [allRuns, user]);
 
-  // Active tab: status 'active', sorted FIFO (lowest run_number first)
-  const activeRuns = useMemo(() => {
+  // New tab: status 'active', no progress yet
+  const newRuns = useMemo(() => {
     return [...myRuns.filter(r => r.status === 'active')]
+      .filter(r => {
+        const p = getRunProgress(r.id, r);
+        return p.pickedUnits === 0 && p.completedStores === 0;
+      })
       .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
-  }, [myRuns]);
+  }, [myRuns, allRunItems, allConfirmations]);
+
+  // In Progress tab: status 'active', with some progress
+  const inProgressRuns = useMemo(() => {
+    return [...myRuns.filter(r => r.status === 'active')]
+      .filter(r => {
+        const p = getRunProgress(r.id, r);
+        return p.pickedUnits > 0 || p.completedStores > 0;
+      })
+      .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
+  }, [myRuns, allRunItems, allConfirmations]);
 
   // Completed tab: status 'completed' or 'dropped_off', newest completed_at first
   const completedRuns = useMemo(() => {
@@ -62,7 +79,7 @@ export default function RunnerHome() {
       .sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
   }, [myRuns]);
 
-  const displayRuns = activeTab === 'active' ? activeRuns : completedRuns;
+  const displayRuns = activeTab === 'new' ? newRuns : activeTab === 'inprogress' ? inProgressRuns : completedRuns;
 
   // Calculate run progress
   const getRunProgress = (runId, run) => {
@@ -104,16 +121,20 @@ export default function RunnerHome() {
 
   const handleMarkDroppedOff = async (e, run) => {
     e.stopPropagation();
+    setDroppingOff(run.id);
     try {
-      await updateRun.mutateAsync({
-        id: run.id,
-        data: { status: 'dropped_off', completed_at: new Date().toISOString() },
-      });
+      const { error: updateError } = await supabase
+        .from('runs')
+        .update({ status: 'dropped_off', completed_at: new Date().toISOString() })
+        .eq('id', run.id);
+      if (updateError) throw updateError;
 
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
       toast.success('Run marked as dropped off');
     } catch (err) {
       console.error('Failed to mark run as dropped off:', err);
       toast.error('Failed to update run');
+      setDroppingOff(null);
       return;
     }
 
@@ -160,6 +181,8 @@ export default function RunnerHome() {
       }
     } catch (err) {
       console.error('Failed to write ledger entries for run:', err);
+    } finally {
+      setDroppingOff(null);
     }
   };
 
@@ -191,34 +214,31 @@ export default function RunnerHome() {
 
       {/* Tabs */}
       <div className="flex bg-muted p-1 rounded-xl">
-        <button
-          onClick={() => setActiveTab('active')}
-          className={`flex-1 py-2 px-4 text-sm font-medium rounded-lg transition-all ${
-            activeTab === 'active'
-              ? 'bg-background shadow-sm text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Active{activeRuns.length > 0 ? ` (${activeRuns.length})` : ''}
-        </button>
-        <button
-          onClick={() => setActiveTab('completed')}
-          className={`flex-1 py-2 px-4 text-sm font-medium rounded-lg transition-all ${
-            activeTab === 'completed'
-              ? 'bg-background shadow-sm text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Completed{completedRuns.length > 0 ? ` (${completedRuns.length})` : ''}
-        </button>
+        {[
+          { key: 'new', label: 'New', count: newRuns.length },
+          { key: 'inprogress', label: 'In Progress', count: inProgressRuns.length },
+          { key: 'completed', label: 'Completed', count: completedRuns.length },
+        ].map(({ key, label, count }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all ${
+              activeTab === key
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}{count > 0 ? ` (${count})` : ''}
+          </button>
+        ))}
       </div>
 
       {/* Runs List */}
       {displayRuns.length === 0 ? (
         <EmptyState
           icon={Truck}
-          title={activeTab === 'active' ? 'No Active Runs' : 'No Completed Runs'}
-          description={activeTab === 'active' ? 'Check back later for new runs' : 'Completed runs will appear here'}
+          title={activeTab === 'new' ? 'No New Runs' : activeTab === 'inprogress' ? 'No Runs In Progress' : 'No Completed Runs'}
+          description={activeTab === 'completed' ? 'Completed runs will appear here' : 'Check back later for new runs'}
         />
       ) : (
         <motion.div
@@ -327,8 +347,9 @@ export default function RunnerHome() {
                           <Button
                             size="sm"
                             onClick={(e) => handleMarkDroppedOff(e, run)}
-                            disabled={updateRun.isPending}
+                            disabled={droppingOff === run.id}
                           >
+                            {droppingOff === run.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Mark Dropped Off
                           </Button>
                         )}

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createOne, updateOne, bulkInsert, deleteOne, bulkDelete } from '@/api/supabase/helpers';
+import { supabase } from '@/api/supabaseClient';
 import { motion } from 'framer-motion';
 import {
   ShoppingCart,
@@ -564,6 +565,42 @@ export default function Orders() {
     }
   }
 
+  /* ---- Cancel entire order (removes from runs too) -------------- */
+  async function cancelEntireOrder(order) {
+    try {
+      // For items assigned to a run, cancel their run_items too
+      for (const item of order.items) {
+        if (item.run_id) {
+          const { data: runItems } = await supabase
+            .from('run_items')
+            .select('id')
+            .eq('run_id', item.run_id)
+            .eq('barcode', item.barcode);
+          for (const ri of runItems || []) {
+            await supabase.from('run_items').update({ status: 'cancelled', picked_qty: 0 }).eq('id', ri.id);
+          }
+        }
+      }
+
+      // Cancel all non-cancelled order items and clear their run_id
+      for (const item of order.items.filter((i) => i.status !== 'cancelled')) {
+        await supabase
+          .from('order_items')
+          .update({ status: 'cancelled', run_id: null })
+          .eq('id', item.id);
+      }
+
+      toast.success(`Order ${order.platform_order_id} cancelled`);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
+      queryClient.invalidateQueries({ queryKey: ['runItems'] });
+    } catch (err) {
+      console.error('Failed to cancel order:', err);
+      toast.error('Failed to cancel order');
+    }
+  }
+
   /* ---- Mark as Shipped (updates inventory too) ------------------ */
   async function markAsShipped(order) {
     try {
@@ -619,18 +656,17 @@ export default function Orders() {
           <form onSubmit={handleCreateOrder} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label htmlFor="new-order-platform">Platform</Label>
-                <Input
-                  id="new-order-platform"
-                  list="platform-suggestions"
-                  value={newOrderPlatform}
-                  onChange={(e) => setNewOrderPlatform(e.target.value)}
-                  placeholder="e.g. Amazon"
-                  required
-                />
-                <datalist id="platform-suggestions">
-                  {platforms.map((p) => <option key={p} value={p} />)}
-                </datalist>
+                <Label>Platform</Label>
+                <Select value={newOrderPlatform} onValueChange={setNewOrderPlatform}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select marketplace" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['Noon', 'Amazon', 'Namshi', 'Trendyol'].map((p) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label htmlFor="new-order-id">Order ID</Label>
@@ -978,6 +1014,15 @@ export default function Orders() {
                                         Cancel (QC Fail)
                                       </DropdownMenuItem>
                                     </>
+                                  )}
+                                  {order.items.some((i) => i.status !== 'cancelled') && (
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                      onClick={() => cancelEntireOrder(order)}
+                                    >
+                                      <XCircle className="mr-2 h-4 w-4" />
+                                      Cancel Order
+                                    </DropdownMenuItem>
                                   )}
                                   <DropdownMenuItem
                                     className="text-destructive focus:text-destructive"

@@ -85,11 +85,70 @@ export function useCancelRuns() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (runIds) => {
-      const { data, error } = await supabase.functions.invoke('cancel-runs', {
-        body: { runIds },
-      });
-      if (error) throw error;
-      return data;
+      const results = [];
+
+      for (const runId of runIds) {
+        const { data: runItems, error: riError } = await supabase
+          .from('run_items')
+          .select('*')
+          .eq('run_id', runId);
+        if (riError) throw riError;
+
+        const pickedItems = (runItems || []).filter((i) => (i.picked_qty || 0) > 0);
+        const unpickedItems = (runItems || []).filter((i) => (i.picked_qty || 0) === 0);
+
+        if (pickedItems.length > 0) {
+          // Has picks: mark run completed, revert unpicked items
+          const { error: runErr } = await supabase
+            .from('runs')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .eq('id', runId);
+          if (runErr) throw runErr;
+
+          for (const item of unpickedItems) {
+            await supabase.from('run_items').update({ status: 'cancelled' }).eq('id', item.id);
+            if (item.type === 'pickup') {
+              await supabase
+                .from('order_items')
+                .update({ status: 'pending', run_id: null })
+                .eq('run_id', runId)
+                .eq('barcode', item.barcode);
+            } else if (item.type === 'return' && item.original_return_id) {
+              await supabase
+                .from('returns')
+                .update({ status: 'pending', run_id: null, run_number: null })
+                .eq('id', item.original_return_id);
+            }
+          }
+          results.push({ runId, status: 'completed', pickedCount: pickedItems.length });
+        } else {
+          // No picks: cancel entire run
+          const { error: runErr } = await supabase
+            .from('runs')
+            .update({ status: 'cancelled' })
+            .eq('id', runId);
+          if (runErr) throw runErr;
+
+          for (const item of runItems || []) {
+            await supabase.from('run_items').update({ status: 'cancelled' }).eq('id', item.id);
+            if (item.type === 'pickup') {
+              await supabase
+                .from('order_items')
+                .update({ status: 'pending', run_id: null })
+                .eq('run_id', runId)
+                .eq('barcode', item.barcode);
+            } else if (item.type === 'return' && item.original_return_id) {
+              await supabase
+                .from('returns')
+                .update({ status: 'pending', run_id: null, run_number: null })
+                .eq('id', item.original_return_id);
+            }
+          }
+          results.push({ runId, status: 'cancelled', revertedCount: (runItems || []).length });
+        }
+      }
+
+      return { results };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['runs'] });
