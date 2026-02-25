@@ -53,35 +53,7 @@ export default function RunnerHome() {
     return allRuns.filter(r => !r.runner_id || r.runner_id === user.id);
   }, [allRuns, user]);
 
-  // New tab: status 'active', no progress yet
-  const newRuns = useMemo(() => {
-    return [...myRuns.filter(r => r.status === 'active')]
-      .filter(r => {
-        const p = getRunProgress(r.id, r);
-        return p.pickedUnits === 0 && p.completedStores === 0;
-      })
-      .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
-  }, [myRuns, allRunItems, allConfirmations]);
-
-  // In Progress tab: status 'active', with some progress
-  const inProgressRuns = useMemo(() => {
-    return [...myRuns.filter(r => r.status === 'active')]
-      .filter(r => {
-        const p = getRunProgress(r.id, r);
-        return p.pickedUnits > 0 || p.completedStores > 0;
-      })
-      .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
-  }, [myRuns, allRunItems, allConfirmations]);
-
-  // Completed tab: status 'completed' or 'dropped_off', newest completed_at first
-  const completedRuns = useMemo(() => {
-    return [...myRuns.filter(r => r.status === 'completed' || r.status === 'dropped_off')]
-      .sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
-  }, [myRuns]);
-
-  const displayRuns = activeTab === 'new' ? newRuns : activeTab === 'inprogress' ? inProgressRuns : completedRuns;
-
-  // Calculate run progress
+  // Calculate run progress (defined before useMemos that use it)
   const getRunProgress = (runId, run) => {
     const items = allRunItems.filter((i) => i.run_id === runId);
     const runConfirmations = allConfirmations.filter((c) => c.run_id === runId);
@@ -112,6 +84,34 @@ export default function RunnerHome() {
         (completedStores === uniqueStores.length && uniqueStores.length > 0),
     };
   };
+
+  // New tab: status 'active', no progress yet
+  const newRuns = useMemo(() => {
+    return [...myRuns.filter(r => r.status === 'active')]
+      .filter(r => {
+        const p = getRunProgress(r.id, r);
+        return p.pickedUnits === 0 && p.completedStores === 0;
+      })
+      .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
+  }, [myRuns, allRunItems, allConfirmations]);
+
+  // In Progress tab: status 'active', with some progress
+  const inProgressRuns = useMemo(() => {
+    return [...myRuns.filter(r => r.status === 'active')]
+      .filter(r => {
+        const p = getRunProgress(r.id, r);
+        return p.pickedUnits > 0 || p.completedStores > 0;
+      })
+      .sort((a, b) => (a.run_number || 0) - (b.run_number || 0));
+  }, [myRuns, allRunItems, allConfirmations]);
+
+  // Completed tab: status 'completed' or 'dropped_off', newest completed_at first
+  const completedRuns = useMemo(() => {
+    return [...myRuns.filter(r => r.status === 'completed' || r.status === 'dropped_off')]
+      .sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
+  }, [myRuns]);
+
+  const displayRuns = activeTab === 'new' ? newRuns : activeTab === 'inprogress' ? inProgressRuns : completedRuns;
 
   const handleRefresh = () => {
     refetchRuns();
