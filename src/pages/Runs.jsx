@@ -449,13 +449,14 @@ export default function Runs() {
         toast.success(`${cancelled} run(s) cancelled`);
       }
 
-      setShowCancelDialog(false);
       setSelectedRuns([]);
     } catch (error) {
-      toast.error('Failed to cancel runs');
-      console.error(error);
+      const msg = error?.message || String(error);
+      toast.error(`Failed to cancel runs: ${msg}`);
+      console.error('cancelRuns error:', error);
     } finally {
       setIsCancelling(false);
+      setShowCancelDialog(false);
     }
   }
 
