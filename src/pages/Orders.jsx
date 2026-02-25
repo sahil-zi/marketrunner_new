@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { createOne, updateOne, bulkInsert } from '@/api/supabase/helpers';
+import { createOne, updateOne, bulkInsert, deleteOne, bulkDelete } from '@/api/supabase/helpers';
 import { motion } from 'framer-motion';
 import {
   ShoppingCart,
@@ -51,6 +51,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 
 import PageHeader from '@/components/admin/PageHeader';
@@ -202,6 +212,49 @@ export default function Orders() {
       toast.error('Failed to create order');
     } finally {
       setNewOrderSaving(false);
+    }
+  }
+
+  /* ---- Delete state & handlers ---------------------------------- */
+  const [deleteTarget, setDeleteTarget] = useState(null); // single order or 'bulk'
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  async function deleteOrder(order) {
+    setIsDeleting(true);
+    try {
+      const itemIds = order.items.map((i) => i.id);
+      if (itemIds.length > 0) await bulkDelete('order_items', itemIds);
+      await deleteOne('orders', order.id);
+      setSelectedOrderIds((prev) => { const next = new Set(prev); next.delete(order.id); return next; });
+      toast.success(`Order ${order.platform_order_id} deleted`);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+      toast.error('Failed to delete order');
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
+  }
+
+  async function deleteSelectedOrders() {
+    const toDelete = ordersWithItems.filter((o) => selectedOrderIds.has(o.id));
+    setIsDeleting(true);
+    try {
+      const allItemIds = toDelete.flatMap((o) => o.items.map((i) => i.id));
+      if (allItemIds.length > 0) await bulkDelete('order_items', allItemIds);
+      await bulkDelete('orders', toDelete.map((o) => o.id));
+      setSelectedOrderIds(new Set());
+      toast.success(`${toDelete.length} order${toDelete.length !== 1 ? 's' : ''} deleted`);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+    } catch (err) {
+      console.error('Failed to delete orders:', err);
+      toast.error('Failed to delete orders');
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
     }
   }
 
@@ -738,6 +791,16 @@ export default function Orders() {
                       {selectedOrderIds.size} selected
                     </span>
                   )}
+                  {selectedOrderIds.size > 0 && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setDeleteTarget('bulk')}
+                      className="shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Selected ({selectedOrderIds.size})
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={exportOrders}
@@ -916,6 +979,13 @@ export default function Orders() {
                                       </DropdownMenuItem>
                                     </>
                                   )}
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => setDeleteTarget(order)}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete Order
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </TableCell>
@@ -959,6 +1029,52 @@ export default function Orders() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* ---- Delete single order confirmation ------------------- */}
+      <AlertDialog open={!!deleteTarget && deleteTarget !== 'bulk'} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete order <strong>{deleteTarget?.platform_order_id}</strong> and all its items. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={() => deleteOrder(deleteTarget)}
+            >
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ---- Delete selected orders confirmation ---------------- */}
+      <AlertDialog open={deleteTarget === 'bulk'} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedOrderIds.size} Order{selectedOrderIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected orders and all their items. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={deleteSelectedOrders}
+            >
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
