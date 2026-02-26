@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle2, X, Loader2 } from 'lucide-react';
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle2, X, Loader2, ClipboardPaste } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -50,7 +51,9 @@ export default function CSVUploader({
   onConfirm,
   renderPreviewRow,
 }) {
+  const [inputMode, setInputMode] = useState('file'); // 'file' | 'paste'
   const [file, setFile] = useState(null);
+  const [pasteText, setPasteText] = useState('');
   const [parsedData, setParsedData] = useState(null);
   const [validationResult, setValidationResult] = useState(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -107,10 +110,46 @@ export default function CSVUploader({
     }
   };
 
+  const handlePasteValidate = useCallback(async () => {
+    if (!pasteText.trim()) return;
+    setParsedData(null);
+    setValidationResult(null);
+
+    // Auto-detect delimiter: tab if tabs present, else comma
+    const delimiter = pasteText.includes('\t') ? '\t' : ',';
+    const { headers, rows } = parseCSV(pasteText, delimiter);
+    if (rows.length === 0) {
+      setValidationResult({
+        isValid: false,
+        errors: [{ row: 0, message: 'No data rows found. Make sure the first line is a header row.' }],
+        warnings: [],
+        stats: {},
+      });
+      return;
+    }
+
+    setParsedData({ headers, rows });
+    setIsValidating(true);
+    try {
+      const result = await onValidate(rows, headers);
+      setValidationResult(result);
+    } catch (error) {
+      setValidationResult({
+        isValid: false,
+        errors: [{ row: 0, message: error.message }],
+        warnings: [],
+        stats: {},
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  }, [pasteText, onValidate]);
+
   const fileInputRef = React.useRef(null);
 
   const reset = () => {
     setFile(null);
+    setPasteText('');
     setParsedData(null);
     setValidationResult(null);
     // Reset the file input so re-selecting the same file triggers onChange
@@ -130,8 +169,38 @@ export default function CSVUploader({
       </CardHeader>
       
       <CardContent className="space-y-6">
+        {/* Mode toggle — only shown before data is loaded */}
+        {!parsedData && !isValidating && (
+          <div className="flex bg-muted p-1 rounded-lg w-fit gap-1">
+            <button
+              type="button"
+              onClick={() => { reset(); setInputMode('file'); }}
+              className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+                inputMode === 'file'
+                  ? 'bg-background shadow-sm text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Upload className="w-4 h-4" />
+              Upload File
+            </button>
+            <button
+              type="button"
+              onClick={() => { reset(); setInputMode('paste'); }}
+              className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+                inputMode === 'paste'
+                  ? 'bg-background shadow-sm text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <ClipboardPaste className="w-4 h-4" />
+              Paste Text
+            </button>
+          </div>
+        )}
+
         {/* File Input */}
-        {!file && (
+        {inputMode === 'file' && !file && (
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-teal-300 transition-colors">
             <input
               ref={fileInputRef}
@@ -151,8 +220,28 @@ export default function CSVUploader({
           </div>
         )}
 
+        {/* Paste Text Input */}
+        {inputMode === 'paste' && !parsedData && !isValidating && (
+          <div className="space-y-3">
+            <Textarea
+              placeholder={`Paste CSV or tab-separated data here.\nFirst row should be headers: ${expectedColumns.join(', ')}`}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              className="min-h-[200px] font-mono text-sm"
+            />
+            <Button
+              onClick={handlePasteValidate}
+              disabled={!pasteText.trim()}
+              className="w-full"
+            >
+              <CheckCircle2 className="w-4 h-4 mr-2" />
+              Parse &amp; Validate
+            </Button>
+          </div>
+        )}
+
         {/* File Selected */}
-        {file && (
+        {inputMode === 'file' && file && (
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
             <div className="flex items-center gap-3">
               <FileSpreadsheet className="w-8 h-8 text-teal-600" />
@@ -161,6 +250,22 @@ export default function CSVUploader({
                 <p className="text-sm text-gray-500">
                   {parsedData ? `${parsedData.rows.length} rows` : 'Parsing...'}
                 </p>
+              </div>
+            </div>
+            <Button variant="ghost" size="icon" onClick={reset}>
+              <X className="w-5 h-5" />
+            </Button>
+          </div>
+        )}
+
+        {/* Pasted data loaded */}
+        {inputMode === 'paste' && parsedData && (
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+            <div className="flex items-center gap-3">
+              <ClipboardPaste className="w-8 h-8 text-teal-600" />
+              <div>
+                <p className="font-medium text-gray-900">Pasted data</p>
+                <p className="text-sm text-gray-500">{parsedData.rows.length} rows</p>
               </div>
             </div>
             <Button variant="ghost" size="icon" onClick={reset}>
@@ -215,7 +320,7 @@ export default function CSVUploader({
             {validationResult.errors?.length > 0 && (
               <Button variant="outline" onClick={reset} className="w-full">
                 <X className="w-4 h-4 mr-2" />
-                Remove file & try again
+                Clear &amp; try again
               </Button>
             )}
 

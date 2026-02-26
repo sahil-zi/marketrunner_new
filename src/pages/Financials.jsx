@@ -273,7 +273,7 @@ export default function Financials() {
       const runNumberMap = {};
       allRuns.forEach(r => { runNumberMap[r.id] = r.run_number; });
 
-      // map run_number+store_id → ledger entry
+      // map run_number+store_id → ledger entry (from full ledger, not filtered)
       const ledgerMap = {};
       ledger.forEach(entry => {
         if (entry.run_number && entry.store_id) {
@@ -281,10 +281,19 @@ export default function Financials() {
         }
       });
 
-      // Apply current store filter
-      const items = filterStore === 'all'
-        ? allRunItems
-        : allRunItems.filter(i => i.store_id === filterStore);
+      // Build set of run_number+store_id keys from filteredLedger (respects all active filters)
+      const filteredKeys = new Set(
+        filteredLedger
+          .filter(e => e.run_number && e.store_id)
+          .map(e => `${e.run_number}-${e.store_id}`)
+      );
+
+      // Apply all active filters via filteredLedger keys
+      const items = allRunItems.filter(i => {
+        const runNumber = runNumberMap[i.run_id];
+        if (!runNumber || !i.store_id) return false;
+        return filteredKeys.has(`${runNumber}-${i.store_id}`);
+      });
 
       const headers = [
         'Date', 'Store', 'Run #', 'Type', 'Style', 'Size', 'Barcode',
@@ -332,7 +341,7 @@ export default function Financials() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      toast.success('Store report exported');
+      toast.success('Item details exported');
     } catch (e) {
       toast.error('Export failed');
       console.error(e);
@@ -674,14 +683,14 @@ export default function Financials() {
             <Button
               variant="outline"
               onClick={exportStoreReport}
-              disabled={isExporting || ledger.length === 0}
+              disabled={isExporting || filteredLedger.length === 0}
             >
               {isExporting ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               ) : (
                 <Download className="w-4 h-4 mr-2" />
               )}
-              Store Report
+              Item Details
             </Button>
             <Button
               variant="outline"
