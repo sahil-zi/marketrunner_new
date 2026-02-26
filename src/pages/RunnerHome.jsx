@@ -252,11 +252,11 @@ export default function RunnerHome() {
           {displayRuns.map((run) => {
             const progress = getRunProgress(run.id, run);
             const isComplete = progress.isComplete;
-            const canMarkDroppedOff = isComplete && run.status !== 'dropped_off';
+            const canMarkDroppedOff = run.status === 'active' || run.status === 'completed';
 
             return (
-              <motion.div key={run.id} variants={item}>
-                {/* Use div + navigate so the Mark Dropped Off button's stopPropagation works reliably */}
+              <motion.div key={run.id} variants={item} className="space-y-2">
+                {/* Card is clickable to navigate into the run */}
                 <div
                   className="cursor-pointer"
                   onClick={() => navigate(createPageUrl(`RunnerPickStore?runId=${run.id}`))}
@@ -327,41 +327,44 @@ export default function RunnerHome() {
                         </div>
                       </div>
 
-                      {/* Stats & Actions */}
-                      <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
-                        <div className="flex items-center gap-6">
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Package className="w-5 h-5" />
-                            <span>
-                              <span className={progress.completedItems === progress.totalItems && progress.totalItems > 0 ? 'text-success font-semibold' : ''}>
-                                {progress.completedItems}
-                              </span>
-                              {' / '}
-                              {progress.totalItems} items done
+                      {/* Stats */}
+                      <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Package className="w-5 h-5" />
+                          <span>
+                            <span className={progress.completedItems === progress.totalItems && progress.totalItems > 0 ? 'text-success font-semibold' : ''}>
+                              {progress.completedItems}
                             </span>
-                          </div>
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Store className="w-5 h-5" />
-                            <span>{run.total_stores || 0} stores</span>
-                          </div>
+                            {' / '}
+                            {progress.totalItems} items done
+                          </span>
                         </div>
-                        {canMarkDroppedOff && (
-                          <Button
-                            size="sm"
-                            onClick={(e) => handleMarkDroppedOff(e, run)}
-                            disabled={droppingOff === run.id}
-                          >
-                            {droppingOff === run.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Mark Dropped Off
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Store className="w-5 h-5" />
+                          <span>{run.total_stores || 0} stores</span>
+                        </div>
                         {run.status === 'dropped_off' && (
-                          <StatusBadge status="dropped_off" />
+                          <div className="ml-auto">
+                            <StatusBadge status="dropped_off" />
+                          </div>
                         )}
                       </div>
                     </CardContent>
                   </Card>
                 </div>
+
+                {/* Mark Dropped Off sits OUTSIDE the clickable card to avoid event conflicts */}
+                {canMarkDroppedOff && (
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={() => handleMarkDroppedOff({ stopPropagation: () => {} }, run)}
+                    disabled={droppingOff === run.id}
+                  >
+                    {droppingOff === run.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Mark Dropped Off
+                  </Button>
+                )}
               </motion.div>
             );
           })}
