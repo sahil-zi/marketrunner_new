@@ -19,6 +19,7 @@ import {
   CheckSquare,
   Square,
   Download,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -460,6 +461,16 @@ export default function Runs() {
     }
   }
 
+  // ---- Mark run as complete ----
+  async function markRunComplete(runId) {
+    try {
+      await updateRun.mutateAsync({ id: runId, data: { status: 'completed', completed_at: new Date().toISOString() } });
+      toast.success('Run marked as complete');
+    } catch (err) {
+      toast.error(`Failed: ${err.message}`);
+    }
+  }
+
   // ---- Toggle run selection ----
   function toggleRunSelection(runId) {
     setSelectedRuns((prev) =>
@@ -637,6 +648,17 @@ export default function Runs() {
                             Activate
                           </Button>
                         </>
+                      )}
+                      {run.status === 'active' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => markRunComplete(run.id)}
+                          disabled={updateRun.isPending}
+                        >
+                          <CheckCircle2 className="w-4 h-4 mr-2" />
+                          Mark Complete
+                        </Button>
                       )}
                       <Link to={createPageUrl(`RunDetails?id=${run.id}`)}>
                         <Button variant="outline" size="sm" aria-label={`View run ${run.run_number}`}>
