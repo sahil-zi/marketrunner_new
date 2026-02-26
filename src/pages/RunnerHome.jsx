@@ -123,17 +123,19 @@ export default function RunnerHome() {
     e.stopPropagation();
     setDroppingOff(run.id);
     try {
-      const { error: updateError } = await supabase
+      const { data: updated, error: updateError } = await supabase
         .from('runs')
         .update({ status: 'dropped_off', completed_at: new Date().toISOString() })
-        .eq('id', run.id);
+        .eq('id', run.id)
+        .select('id');
       if (updateError) throw updateError;
+      if (!updated || updated.length === 0) throw new Error('No rows updated — run may be blocked by a database permission or RLS policy');
 
       queryClient.invalidateQueries({ queryKey: ['runs'] });
       toast.success('Run marked as dropped off');
     } catch (err) {
       console.error('Failed to mark run as dropped off:', err);
-      toast.error('Failed to update run');
+      toast.error(`Failed: ${err.message}`);
       setDroppingOff(null);
       return;
     }
