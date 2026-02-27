@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 import {
-  DollarSign,
   Plus,
   Store as StoreIcon,
   TrendingUp,
@@ -13,6 +12,7 @@ import {
   X,
   Download,
 } from 'lucide-react';
+import { DirhamIcon } from '@/components/ui/dirham-icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -407,7 +407,7 @@ export default function Financials() {
                     totalBalance >= 0 ? 'bg-success/15' : 'bg-destructive/15'
                   )}
                 >
-                  <DollarSign
+                  <DirhamIcon
                     className={cn(
                       'w-6 h-6',
                       totalBalance >= 0 ? 'text-success' : 'text-destructive'

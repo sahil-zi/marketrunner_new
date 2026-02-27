@@ -4,12 +4,12 @@ import { createPageUrl } from './utils';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DirhamIcon } from '@/components/ui/dirham-icon';
 import {
   LayoutDashboard,
   Package,
   ShoppingCart,
   Truck,
-  DollarSign,
   Settings,
   Menu,
   X,
@@ -39,7 +39,7 @@ const adminNavItems = [
   { name: 'Orders', icon: ShoppingCart, page: 'Orders' },
   { name: 'Returns', icon: PackageX, page: 'Returns' },
   { name: 'Runs', icon: Truck, page: 'Runs' },
-  { name: 'Financials', icon: DollarSign, page: 'Financials' },
+  { name: 'Financials', icon: DirhamIcon, page: 'Financials' },
   { name: 'Settings', icon: Settings, page: 'AdminSettings' },
 ];
 
@@ -53,7 +53,7 @@ const mobileTabItems = [
 
 const moreMenuItems = [
   { name: 'Returns', icon: PackageX, page: 'Returns' },
-  { name: 'Financials', icon: DollarSign, page: 'Financials' },
+  { name: 'Financials', icon: DirhamIcon, page: 'Financials' },
   { name: 'Print Labels', icon: Printer, page: 'PrintLabels' },
   { name: 'Settings', icon: Settings, page: 'AdminSettings' },
 ];
