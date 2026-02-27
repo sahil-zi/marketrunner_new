@@ -713,32 +713,69 @@ export default function Orders() {
   }
 
   /* ---- Mark as Shipped (updates inventory too) ------------------ */
-  async function markAsShipped(order) {
+  // itemsToShip: array of order_items to mark as shipped (non-cancelled subset)
+  async function markAsShipped(order, itemsToShip) {
+    const toShip = itemsToShip ?? order.items.filter((i) => i.status !== 'cancelled');
     try {
-      // Update order items to shipped via mutation for cache consistency
-      for (const item of order.items) {
-        await updateOrderItem.mutateAsync({
-          id: item.id,
-          data: { status: 'shipped' },
-        });
+      for (const item of toShip) {
+        await updateOrderItem.mutateAsync({ id: item.id, data: { status: 'shipped' } });
       }
-
-      // Update inventory for each item
-      for (const item of order.items) {
+      for (const item of toShip) {
         const product = products.find((p) => p.barcode === item.barcode);
         if (product) {
-          const newInventory = (product.inventory || 0) - item.quantity;
           await updateOne('product_catalog', product.id, {
-            inventory: Math.max(0, newInventory),
+            inventory: Math.max(0, (product.inventory || 0) - item.quantity),
           });
         }
       }
-
       toast.success('Order marked as shipped, inventory updated');
       queryClient.invalidateQueries({ queryKey: ['products'] });
     } catch (error) {
       console.error('markAsShipped failed:', error);
       toast.error('Failed to mark as shipped');
+    }
+  }
+
+  /* ---- Review & Ship dialog (multi-item orders) ----------------- */
+  const [shipTarget, setShipTarget] = useState(null);       // order being reviewed
+  const [cancelledInDialog, setCancelledInDialog] = useState(new Set()); // item ids marked for cancel
+  const [cancelReason, setCancelReason] = useState('oos');
+  const [isShipping, setIsShipping] = useState(false);
+
+  function openShipDialog(order) {
+    setCancelledInDialog(new Set());
+    setCancelReason('oos');
+    setShipTarget(order);
+  }
+
+  function toggleCancelInDialog(itemId) {
+    setCancelledInDialog((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  async function handleConfirmShip() {
+    if (!shipTarget) return;
+    setIsShipping(true);
+    try {
+      // Cancel items the user marked
+      const toCancel = shipTarget.items.filter(
+        (i) => cancelledInDialog.has(i.id) && i.status !== 'cancelled'
+      );
+      if (toCancel.length > 0) await cancelOrderItems(toCancel, cancelReason);
+
+      // Ship the rest that are picked and not cancelled
+      const toShip = shipTarget.items.filter(
+        (i) => !cancelledInDialog.has(i.id) && i.status !== 'cancelled' && i.status === 'picked'
+      );
+      if (toShip.length > 0) await markAsShipped(shipTarget, toShip);
+
+      setShipTarget(null);
+    } finally {
+      setIsShipping(false);
     }
   }
 
@@ -1090,46 +1127,46 @@ export default function Orders() {
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Edit Order
                                   </DropdownMenuItem>
-                                  {order.items.every(
-                                    (i) => i.status === 'picked'
-                                  ) && (
-                                    <DropdownMenuItem
-                                      onClick={() => markAsShipped(order)}
-                                    >
-                                      <CheckCircle2 className="mr-2 h-4 w-4" />
-                                      Mark as Shipped
-                                    </DropdownMenuItem>
-                                  )}
-                                  {order.items.some(
-                                    (i) => i.status === 'pending'
-                                  ) && (
-                                    <>
-                                      <DropdownMenuItem
-                                        className="text-destructive focus:text-destructive"
-                                        onClick={() =>
-                                          cancelOrderItems(
-                                            order.items.filter((i) => i.status === 'pending'),
-                                            'oos'
-                                          )
-                                        }
-                                      >
-                                        <XCircle className="mr-2 h-4 w-4" />
-                                        Cancel (Out of Stock)
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        className="text-destructive focus:text-destructive"
-                                        onClick={() =>
-                                          cancelOrderItems(
-                                            order.items.filter((i) => i.status === 'pending'),
-                                            'qc_fail'
-                                          )
-                                        }
-                                      >
-                                        <XCircle className="mr-2 h-4 w-4" />
-                                        Cancel (QC Fail)
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
+                                  {(() => {
+                                    const nonCancelled = order.items.filter((i) => i.status !== 'cancelled');
+                                    const allPicked = nonCancelled.length > 0 && nonCancelled.every((i) => i.status === 'picked');
+                                    const isSingle = order.items.length === 1;
+                                    const singleItem = order.items[0];
+                                    const cancellable = order.items.filter((i) => i.status === 'pending' || i.status === 'picked');
+
+                                    if (isSingle) {
+                                      return (
+                                        <>
+                                          {singleItem?.status === 'picked' && (
+                                            <DropdownMenuItem onClick={() => markAsShipped(order)}>
+                                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                                              Mark as Shipped
+                                            </DropdownMenuItem>
+                                          )}
+                                          {cancellable.length > 0 && (
+                                            <DropdownMenuItem
+                                              className="text-destructive focus:text-destructive"
+                                              onClick={() => cancelOrderItems(cancellable, 'oos')}
+                                            >
+                                              <XCircle className="mr-2 h-4 w-4" />
+                                              Cancel (Out of Stock)
+                                            </DropdownMenuItem>
+                                          )}
+                                        </>
+                                      );
+                                    }
+
+                                    return (
+                                      <>
+                                        {(allPicked || cancellable.length > 0) && (
+                                          <DropdownMenuItem onClick={() => openShipDialog(order)}>
+                                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                                            Review &amp; Ship
+                                          </DropdownMenuItem>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                   {order.items.some((i) => i.status !== 'cancelled') && (
                                     <DropdownMenuItem
                                       className="text-destructive focus:text-destructive"
@@ -1189,6 +1226,114 @@ export default function Orders() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* ---- Review & Ship Dialog (multi-item) ------------------ */}
+      <Dialog open={!!shipTarget} onOpenChange={(open) => { if (!open) setShipTarget(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Review &amp; Ship — {shipTarget?.platform_order_id}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Toggle off any items you don't want to ship. They will be cancelled.
+            </p>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {shipTarget?.items.map((item) => {
+                const alreadyCancelled = item.status === 'cancelled';
+                const markedForCancel = cancelledInDialog.has(item.id);
+                const cancellable = item.status === 'pending' || item.status === 'picked';
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
+                      alreadyCancelled || markedForCancel
+                        ? 'border-destructive/20 bg-destructive/5 opacity-60'
+                        : 'border-border bg-card'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${markedForCancel ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                        {getProductName(item.barcode)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.barcode} · qty {item.quantity}
+                      </p>
+                    </div>
+                    {alreadyCancelled ? (
+                      <Badge variant="secondary" className="text-xs shrink-0">Already cancelled</Badge>
+                    ) : markedForCancel ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0 text-xs"
+                        onClick={() => toggleCancelInDialog(item.id)}
+                      >
+                        Undo
+                      </Button>
+                    ) : cancellable ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0 text-xs text-destructive hover:text-destructive"
+                        onClick={() => toggleCancelInDialog(item.id)}
+                      >
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Cancel
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            {cancelledInDialog.size > 0 && (
+              <div className="space-y-1">
+                <Label className="text-sm">Cancellation reason</Label>
+                <Select value={cancelReason} onValueChange={setCancelReason}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="oos">Out of Stock</SelectItem>
+                    <SelectItem value="qc_fail">QC Fail</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {(() => {
+              const toShipCount = (shipTarget?.items ?? []).filter(
+                (i) => !cancelledInDialog.has(i.id) && i.status !== 'cancelled' && i.status === 'picked'
+              ).length;
+              const toCancelCount = cancelledInDialog.size;
+              return (
+                <p className="text-sm text-muted-foreground">
+                  {toShipCount > 0
+                    ? `${toShipCount} item${toShipCount !== 1 ? 's' : ''} will be shipped`
+                    : 'No items will be shipped'}
+                  {toCancelCount > 0 && `, ${toCancelCount} will be cancelled`}
+                </p>
+              );
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShipTarget(null)} disabled={isShipping}>
+              Close
+            </Button>
+            <Button
+              onClick={handleConfirmShip}
+              disabled={isShipping || (shipTarget?.items ?? []).filter(
+                (i) => !cancelledInDialog.has(i.id) && i.status !== 'cancelled' && i.status === 'picked'
+              ).length === 0}
+            >
+              {isShipping && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirm &amp; Ship
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ---- Edit Order Dialog ---------------------------------- */}
       <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
