@@ -16,6 +16,8 @@ import {
   XCircle,
   Plus,
   Trash2,
+  Pencil,
+  Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -136,6 +138,115 @@ export default function Orders() {
   const [newOrderDate, setNewOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [newOrderItems, setNewOrderItems] = useState([{ barcode: '', quantity: 1 }]);
   const [newOrderSaving, setNewOrderSaving] = useState(false);
+
+  /* ---- Edit Order dialog state ---------------------------------- */
+  const [editTarget, setEditTarget] = useState(null);
+  const [editPlatform, setEditPlatform] = useState('');
+  const [editOrderId, setEditOrderId] = useState('');
+  const [editOrderDate, setEditOrderDate] = useState('');
+  // Each item: { id?, barcode, quantity, status, run_id } — id is undefined for new rows
+  const [editItems, setEditItems] = useState([]);
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEditDialog(order) {
+    setEditPlatform(order.platform_name || '');
+    setEditOrderId(order.platform_order_id || '');
+    setEditOrderDate(
+      order.order_timestamp ? order.order_timestamp.split('T')[0] : new Date().toISOString().split('T')[0]
+    );
+    setEditItems(
+      order.items.map((i) => ({ id: i.id, barcode: i.barcode, quantity: i.quantity, status: i.status, run_id: i.run_id }))
+    );
+    setEditTarget(order);
+  }
+
+  function addEditItemRow() {
+    setEditItems((prev) => [...prev, { barcode: '', quantity: 1 }]);
+  }
+
+  function removeEditItemRow(idx) {
+    setEditItems((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateEditItemRow(idx, field, value) {
+    setEditItems((prev) => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
+  }
+
+  async function handleSaveOrder(e) {
+    e.preventDefault();
+    const platform = editPlatform.trim();
+    const orderId = editOrderId.trim();
+    if (!platform) { toast.error('Platform is required'); return; }
+    if (!orderId) { toast.error('Order ID is required'); return; }
+
+    // Only editable rows (no run_id) contribute to validation
+    const editableItems = editItems.filter((r) => !r.run_id);
+    const lockedItems = editItems.filter((r) => r.run_id);
+    const newRows = editableItems.filter((r) => r.barcode.trim());
+    if (newRows.length === 0 && lockedItems.length === 0) {
+      toast.error('Order must have at least one item');
+      return;
+    }
+
+    // Validate barcodes on new/changed editable rows
+    const knownBarcodes = new Set(products.map((p) => p.barcode));
+    const unknownBarcodes = [
+      ...new Set(newRows.map((r) => r.barcode.trim()).filter((b) => !knownBarcodes.has(b))),
+    ];
+    if (unknownBarcodes.length > 0) {
+      toast.error(`Unknown barcode(s): ${unknownBarcodes.join(', ')}`);
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      // Update order header
+      await updateOne('orders', editTarget.id, {
+        platform_name: platform,
+        platform_order_id: orderId,
+        order_timestamp: new Date(editOrderDate).toISOString(),
+      });
+
+      // Determine original editable items (had an id, no run_id in original)
+      const originalEditableIds = new Set(
+        editTarget.items.filter((i) => !i.run_id).map((i) => i.id)
+      );
+      const keptIds = new Set(editableItems.filter((r) => r.id).map((r) => r.id));
+
+      // Items to delete: were in original editable set, but not kept
+      const toDeleteIds = [...originalEditableIds].filter((id) => !keptIds.has(id));
+      if (toDeleteIds.length > 0) await bulkDelete('order_items', toDeleteIds);
+
+      // Items to update: existing items (have id) whose qty changed
+      for (const row of editableItems.filter((r) => r.id)) {
+        const original = editTarget.items.find((i) => i.id === row.id);
+        if (original && original.quantity !== row.quantity) {
+          await updateOne('order_items', row.id, { quantity: Math.max(1, parseInt(row.quantity) || 1) });
+        }
+      }
+
+      // Items to insert: new rows (no id)
+      const toInsert = editableItems
+        .filter((r) => !r.id && r.barcode.trim())
+        .map((r) => ({
+          order_id: editTarget.id,
+          barcode: r.barcode.trim(),
+          quantity: Math.max(1, parseInt(r.quantity) || 1),
+          status: 'pending',
+        }));
+      if (toInsert.length > 0) await bulkInsert('order_items', toInsert);
+
+      toast.success(`Order ${orderId} updated`);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderItems'] });
+      setEditTarget(null);
+    } catch (err) {
+      console.error('Failed to save order:', err);
+      toast.error('Failed to save order');
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   function openNewOrderDialog() {
     setNewOrderPlatform('');
@@ -975,6 +1086,10 @@ export default function Orders() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => openEditDialog(order)}>
+                                    <Pencil className="mr-2 h-4 w-4" />
+                                    Edit Order
+                                  </DropdownMenuItem>
                                   {order.items.every(
                                     (i) => i.status === 'picked'
                                   ) && (
@@ -1074,6 +1189,111 @@ export default function Orders() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* ---- Edit Order Dialog ---------------------------------- */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Order</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSaveOrder} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Platform</Label>
+                <Select value={editPlatform} onValueChange={setEditPlatform}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select marketplace" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['Noon', 'Amazon', 'Namshi', 'Trendyol'].map((p) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-order-id">Order ID</Label>
+                <Input
+                  id="edit-order-id"
+                  value={editOrderId}
+                  onChange={(e) => setEditOrderId(e.target.value)}
+                  placeholder="e.g. AMZ-12345"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="edit-order-date">Order Date</Label>
+              <Input
+                id="edit-order-date"
+                type="date"
+                value={editOrderDate}
+                onChange={(e) => setEditOrderDate(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Items</Label>
+              {editItems.map((row, idx) => {
+                const isLocked = !!row.run_id;
+                return (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Input
+                      placeholder="Barcode"
+                      value={row.barcode}
+                      onChange={(e) => updateEditItemRow(idx, 'barcode', e.target.value)}
+                      className="flex-1"
+                      disabled={isLocked}
+                    />
+                    <Input
+                      type="number"
+                      min={1}
+                      placeholder="Qty"
+                      value={row.quantity}
+                      onChange={(e) => updateEditItemRow(idx, 'quantity', e.target.value)}
+                      className="w-20"
+                      disabled={isLocked}
+                    />
+                    {isLocked ? (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground px-1" title="Assigned to a run — cannot edit">
+                        <Lock className="h-3.5 w-3.5" />
+                        <span>In Run</span>
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeEditItemRow(idx)}
+                        disabled={editItems.filter((r) => !r.run_id).length === 1 && !row.id}
+                        aria-label="Remove item"
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+              <Button type="button" variant="outline" size="sm" onClick={addEditItemRow} className="w-full">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Item
+              </Button>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditTarget(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={editSaving}>
+                {editSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* ---- Delete single order confirmation ------------------- */}
       <AlertDialog open={!!deleteTarget && deleteTarget !== 'bulk'} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
