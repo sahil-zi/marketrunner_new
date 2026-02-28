@@ -12,6 +12,7 @@ import {
   CircleDot,
   CircleOff,
   PackageCheck,
+  TruckIcon,
 } from "lucide-react";
 
 const STATUS_CONFIG = {
@@ -49,6 +50,11 @@ const STATUS_CONFIG = {
     label: "Shipped",
     icon: Truck,
     className: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  },
+  partially_shipped: {
+    label: "Partially Shipped",
+    icon: TruckIcon,
+    className: "bg-orange-500/15 text-orange-400 border-orange-500/20",
   },
   assigned_to_run: {
     label: "Assigned to Run",

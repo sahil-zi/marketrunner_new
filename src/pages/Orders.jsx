@@ -102,6 +102,7 @@ function deriveOrderStatus(items) {
   const activeItems = items.filter((i) => i.status !== 'cancelled');
   if (activeItems.length === 0) return 'cancelled';
   if (activeItems.every((i) => i.status === 'shipped')) return 'shipped';
+  if (activeItems.some((i) => i.status === 'shipped')) return 'partially_shipped';
   if (activeItems.every((i) => i.status === 'picked')) return 'picked';
   if (activeItems.some((i) => i.status === 'pending')) return 'pending';
   return 'assigned_to_run';
@@ -935,6 +936,7 @@ export default function Orders() {
                     <SelectItem value="assigned_to_run">Assigned to Run</SelectItem>
                     <SelectItem value="picked">Picked</SelectItem>
                     <SelectItem value="shipped">Shipped</SelectItem>
+                    <SelectItem value="partially_shipped">Partially Shipped</SelectItem>
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
