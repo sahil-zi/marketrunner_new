@@ -18,6 +18,8 @@ import {
   Trash2,
   Pencil,
   Lock,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -131,6 +133,16 @@ export default function Orders() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
+  const [expandedOrderIds, setExpandedOrderIds] = useState(new Set());
+
+  function toggleExpand(id) {
+    setExpandedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   /* ---- New Order dialog state ----------------------------------- */
   const [newOrderOpen, setNewOrderOpen] = useState(false);
@@ -1084,22 +1096,40 @@ export default function Orders() {
 
                             {/* Items */}
                             <TableCell>
-                              <div className="space-y-1">
-                                {order.items.slice(0, 3).map((item, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="text-sm text-foreground"
+                              {order.items.length === 1 ? (
+                                <div className="text-sm text-foreground">
+                                  {getProductName(order.items[0].barcode)} &times; {order.items[0].quantity}
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleExpand(order.id)}
+                                    className="flex items-center gap-1 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
                                   >
-                                    {getProductName(item.barcode)} &times;{' '}
-                                    {item.quantity}
-                                  </div>
-                                ))}
-                                {order.items.length > 3 && (
-                                  <div className="text-sm text-muted-foreground">
-                                    +{order.items.length - 3} more
-                                  </div>
-                                )}
-                              </div>
+                                    {expandedOrderIds.has(order.id)
+                                      ? <ChevronUp className="h-3.5 w-3.5" />
+                                      : <ChevronDown className="h-3.5 w-3.5" />}
+                                    {order.items.length} items
+                                  </button>
+                                  {expandedOrderIds.has(order.id) && (
+                                    <div className="space-y-1 pt-1 border-t border-border mt-1">
+                                      {order.items.map((item, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 text-sm">
+                                          <span className="text-foreground">{getProductName(item.barcode)}</span>
+                                          <span className="text-muted-foreground shrink-0">&times; {item.quantity}</span>
+                                          {item.status === 'cancelled' && (
+                                            <span className="text-xs text-destructive">(cancelled)</span>
+                                          )}
+                                          {item.status === 'shipped' && (
+                                            <span className="text-xs text-purple-400">(shipped)</span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </TableCell>
 
                             {/* Total Qty */}
