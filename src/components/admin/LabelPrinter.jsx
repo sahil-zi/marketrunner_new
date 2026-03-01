@@ -5,12 +5,12 @@ import { toast } from 'sonner';
 
 // Generate ZPL for QR code layout (4x3cm label, 203dpi)
 function generateQRLayout(barcode, style, size, orderNumber) {
-  const ll = orderNumber ? '260' : '240';
-  // Order number sits directly below barcode text, same x/width/alignment
-  const orderField = orderNumber ? `^FO10,238^A0N,18,18^FB140,1,0,C,0^FD${orderNumber}^FS` : '';
+  const ll = orderNumber ? '270' : '240';
+  // Barcode text and order number are full-width centered, stacked below QR code
+  const orderField = orderNumber ? `^FO10,241^A0N,24,24^FB380,1,0,C,0^FD${orderNumber}^FS` : '';
   return `^XA^PW400^LL${ll}^CI28
 ^FO10,40^BQN,2,7^FDQA,${barcode}^FS
-^FO10,215^A0N,22,22^FB140,1,0,C,0^FD${barcode}^FS
+^FO10,215^A0N,24,24^FB380,1,0,C,0^FD${barcode}^FS
 ${orderField}
 ^FO240,75^A0N,35,35^FB150,1,0,L^FDStyle:^FS
 ^FO240,105^A0N,35,35^FB150,2,0,L^FD${style}^FS
@@ -21,14 +21,14 @@ ${orderField}
 // Generate ZPL for Barcode (Code 128) layout (4x3cm label, 203dpi)
 function generateBarcodeLayout(barcode, style, size, orderNumber) {
   // When order number is present, shift Style/Size section down to make room
-  const ll = orderNumber ? '280' : '265';
-  const orderField = orderNumber ? `^FO125,153^A0N,18,18^FB150,1,0,C,0^FD${orderNumber}^FS` : '';
-  const styleY  = orderNumber ? 192 : 170;
-  const nameY   = orderNumber ? 222 : 200;
-  const sizeY   = orderNumber ? 255 : 230;
+  const ll = orderNumber ? '285' : '265';
+  const orderField = orderNumber ? `^FO10,155^A0N,24,24^FB380,1,0,C,0^FD${orderNumber}^FS` : '';
+  const styleY = orderNumber ? 185 : 170;
+  const nameY  = orderNumber ? 215 : 200;
+  const sizeY  = orderNumber ? 248 : 230;
   return `^XA^PW400^LL${ll}^CI28
 ^FO60,30^BY2,2.0,60^BCN,80,N,N,N^FD${barcode}^FS
-^FO125,130^A0N,22,22^FB150,1,0,C,0^FD${barcode}^FS
+^FO10,130^A0N,24,24^FB380,1,0,C,0^FD${barcode}^FS
 ${orderField}
 ^FO100,${styleY}^A0N,25,25^FB150,1,0,L^FDStyle:^FS
 ^FO100,${nameY}^A0N,25,25^FB150,2,0,L^FD${style}^FS
