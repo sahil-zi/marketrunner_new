@@ -21,6 +21,7 @@ import {
   Download,
   CheckCircle2,
   Search,
+  Pencil,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -138,6 +139,8 @@ export default function Runs() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [runItemsCache, setRunItemsCache] = useState({});
   const [successDialog, setSuccessDialog] = useState(null); // { runNumber, items }
+  const [editRunDialog, setEditRunDialog] = useState(null); // run object
+  const [editRunDate, setEditRunDate] = useState('');
 
   // ---- Derived ----
   const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
@@ -499,6 +502,56 @@ export default function Runs() {
     }
   }
 
+  // ---- Export CSV ----
+  async function exportRunCSV(runId) {
+    const items = await loadRunItems(runId);
+    if (items.length === 0) {
+      toast.error('No items in this run');
+      return;
+    }
+    const run = runs.find((r) => r.id === runId);
+    const headers = ['Barcode', 'Style', 'Size', 'Color', 'Store', 'Type', 'Target Qty', 'Picked Qty', 'Status'];
+    const rows = items.map((item) => [
+      item.barcode,
+      item.style_name,
+      item.size,
+      item.color,
+      item.store_name,
+      item.type,
+      item.target_qty,
+      item.picked_qty,
+      item.status,
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `run_${run?.run_number || runId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    a.remove();
+  }
+
+  // ---- Edit run ----
+  function openEditDialog(run) {
+    setEditRunDialog(run);
+    setEditRunDate(run.date || '');
+  }
+
+  async function saveRunEdit() {
+    try {
+      await updateRun.mutateAsync({ id: editRunDialog.id, data: { date: editRunDate } });
+      toast.success('Run updated');
+      setEditRunDialog(null);
+    } catch {
+      toast.error('Failed to update run');
+    }
+  }
+
   // ---- Cancel runs ----
   async function cancelRuns() {
     setIsCancelling(true);
@@ -710,6 +763,15 @@ export default function Runs() {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => exportRunCSV(run.id)}
+                        aria-label={`Export run ${run.run_number} as CSV`}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Export CSV
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => exportRunPDF(run.id)}
                         aria-label={`Export run ${run.run_number} as PDF`}
                       >
@@ -736,6 +798,15 @@ export default function Runs() {
                       </Button>
                       {run.status === 'draft' && (
                         <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditDialog(run)}
+                            aria-label={`Edit run ${run.run_number}`}
+                          >
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Edit
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -946,6 +1017,44 @@ export default function Runs() {
             </Button>
             <Button variant="ghost" onClick={() => setSuccessDialog(null)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Run Dialog */}
+      <Dialog open={!!editRunDialog} onOpenChange={() => setEditRunDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Run #{editRunDialog?.run_number}</DialogTitle>
+            <DialogDescription>Update details for this draft run.</DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground" htmlFor="edit-run-date">
+                Date
+              </label>
+              <Input
+                id="edit-run-date"
+                type="date"
+                value={editRunDate}
+                onChange={(e) => setEditRunDate(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRunDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={saveRunEdit} disabled={updateRun.isPending}>
+              {updateRun.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
