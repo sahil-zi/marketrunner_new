@@ -81,19 +81,6 @@ export default function Runs() {
   const updateRun = useUpdateRun();
   const cancelRunsMutation = useCancelRuns();
 
-  // ---- Pagination ----
-  const {
-    currentPage,
-    itemsPerPage,
-    totalPages,
-    paginatedItems: paginatedRuns,
-    setPerPage,
-    nextPage,
-    prevPage,
-    hasPrevPage,
-    hasNextPage,
-  } = usePagination(filteredRuns, 50);
-
   // ---- Search / filter state ----
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -125,6 +112,19 @@ export default function Runs() {
       return matchesStatus && matchesSearch;
     });
   }, [runs, searchQuery, filterStatus, runItemsSearchMap]);
+
+  // ---- Pagination ----
+  const {
+    currentPage,
+    itemsPerPage,
+    totalPages,
+    paginatedItems: paginatedRuns,
+    setPerPage,
+    nextPage,
+    prevPage,
+    hasPrevPage,
+    hasNextPage,
+  } = usePagination(filteredRuns, 50);
 
   // ---- UI state only ----
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
