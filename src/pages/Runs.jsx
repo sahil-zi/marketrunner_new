@@ -426,11 +426,12 @@ export default function Runs() {
   }
 
   // ---- Enrich run items with order number ----
+  // Expands items so each order gets its own label group with the correct order number.
   async function enrichWithOrderNumber(items, runId) {
     try {
       const { data: orderItems } = await supabase
         .from('order_items')
-        .select('barcode, order_id')
+        .select('barcode, order_id, quantity')
         .eq('run_id', runId);
       if (!orderItems || orderItems.length === 0) return items;
 
@@ -442,14 +443,32 @@ export default function Runs() {
       if (!orders) return items;
 
       const orderMap = Object.fromEntries(orders.map((o) => [o.id, o.platform_order_id]));
-      const barcodeToOrderNumber = {};
+
+      // barcode → [{order_number, qty}]
+      const barcodeOrders = {};
       orderItems.forEach((oi) => {
-        if (oi.order_id && orderMap[oi.order_id]) {
-          barcodeToOrderNumber[oi.barcode] = orderMap[oi.order_id];
+        const orderNum = oi.order_id && orderMap[oi.order_id];
+        if (!orderNum) return;
+        if (!barcodeOrders[oi.barcode]) barcodeOrders[oi.barcode] = [];
+        barcodeOrders[oi.barcode].push({ order_number: orderNum, qty: oi.quantity || 1 });
+      });
+
+      const expanded = [];
+      items.forEach((item) => {
+        const breakdown = barcodeOrders[item.barcode];
+        if (!breakdown || breakdown.length === 0) {
+          expanded.push(item);
+        } else if (breakdown.length === 1) {
+          expanded.push({ ...item, order_number: breakdown[0].order_number });
+        } else {
+          // Multiple orders for this barcode — one label group per order
+          breakdown.forEach(({ order_number, qty }) => {
+            expanded.push({ ...item, order_number, target_qty: qty });
+          });
         }
       });
 
-      return items.map((item) => ({ ...item, order_number: barcodeToOrderNumber[item.barcode] || '' }));
+      return expanded;
     } catch {
       return items; // non-fatal — print without order number if lookup fails
     }

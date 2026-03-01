@@ -130,7 +130,7 @@ export default function RunnerHome() {
     try {
       const { data: orderItems } = await supabase
         .from('order_items')
-        .select('barcode, order_id')
+        .select('barcode, order_id, quantity')
         .eq('run_id', runId);
       if (!orderItems || orderItems.length === 0) return items;
       const orderIds = [...new Set(orderItems.map((i) => i.order_id).filter(Boolean))];
@@ -140,13 +140,31 @@ export default function RunnerHome() {
         .in('id', orderIds);
       if (!orders) return items;
       const orderMap = Object.fromEntries(orders.map((o) => [o.id, o.platform_order_id]));
-      const barcodeToOrderNumber = {};
+
+      // barcode → [{order_number, qty}]
+      const barcodeOrders = {};
       orderItems.forEach((oi) => {
-        if (oi.order_id && orderMap[oi.order_id]) {
-          barcodeToOrderNumber[oi.barcode] = orderMap[oi.order_id];
+        const orderNum = oi.order_id && orderMap[oi.order_id];
+        if (!orderNum) return;
+        if (!barcodeOrders[oi.barcode]) barcodeOrders[oi.barcode] = [];
+        barcodeOrders[oi.barcode].push({ order_number: orderNum, qty: oi.quantity || 1 });
+      });
+
+      const expanded = [];
+      items.forEach((item) => {
+        const breakdown = barcodeOrders[item.barcode];
+        if (!breakdown || breakdown.length === 0) {
+          expanded.push(item);
+        } else if (breakdown.length === 1) {
+          expanded.push({ ...item, order_number: breakdown[0].order_number });
+        } else {
+          breakdown.forEach(({ order_number, qty }) => {
+            expanded.push({ ...item, order_number, target_qty: qty });
+          });
         }
       });
-      return items.map((item) => ({ ...item, order_number: barcodeToOrderNumber[item.barcode] || '' }));
+
+      return expanded;
     } catch {
       return items;
     }
