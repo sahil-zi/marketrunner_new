@@ -20,7 +20,9 @@ import {
   Square,
   Download,
   CheckCircle2,
+  Search,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -46,7 +48,7 @@ import EmptyState from '@/components/admin/EmptyState';
 import OrderSelector from '@/components/admin/OrderSelector';
 import LabelPrinter, { generateZPL, downloadZPLFile } from '@/components/admin/LabelPrinter';
 
-import { useRuns, useUpdateRun, useCancelRuns } from '@/hooks/use-runs';
+import { useRuns, useAllRunItems, useUpdateRun, useCancelRuns } from '@/hooks/use-runs';
 import { usePendingOrderItems } from '@/hooks/use-orders';
 import { usePendingReturns } from '@/hooks/use-returns';
 import { useProducts } from '@/hooks/use-products';
@@ -68,6 +70,7 @@ export default function Runs() {
 
   // ---- React Query data hooks ----
   const { data: runs = [], isLoading } = useRuns('-created_date');
+  const { data: allRunItems = [] } = useAllRunItems();
   const { data: pendingOrderItems = [] } = usePendingOrderItems();
   const { data: pendingReturnItems = [] } = usePendingReturns();
   const { data: products = [] } = useProducts();
@@ -89,7 +92,39 @@ export default function Runs() {
     prevPage,
     hasPrevPage,
     hasNextPage,
-  } = usePagination(runs, 50);
+  } = usePagination(filteredRuns, 50);
+
+  // ---- Search / filter state ----
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  // Build a map of run_id → searchable text from run_items (store, barcode, style)
+  const runItemsSearchMap = useMemo(() => {
+    const map = {};
+    allRunItems.forEach((item) => {
+      if (!item.run_id) return;
+      if (!map[item.run_id]) map[item.run_id] = '';
+      map[item.run_id] +=
+        ` ${(item.store_name || '').toLowerCase()}` +
+        ` ${(item.barcode || '').toLowerCase()}` +
+        ` ${(item.style_name || '').toLowerCase()}`;
+    });
+    return map;
+  }, [allRunItems]);
+
+  const filteredRuns = useMemo(() => {
+    return runs.filter((run) => {
+      const matchesStatus = filterStatus === 'all' || run.status === filterStatus;
+      const q = searchQuery.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        String(run.run_number).includes(q) ||
+        (run.runner_name || '').toLowerCase().includes(q) ||
+        (run.date || '').includes(q) ||
+        (runItemsSearchMap[run.id] || '').includes(q);
+      return matchesStatus && matchesSearch;
+    });
+  }, [runs, searchQuery, filterStatus, runItemsSearchMap]);
 
   // ---- UI state only ----
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
@@ -525,6 +560,34 @@ export default function Runs() {
         </Card>
       )}
 
+      {/* Search + Filter */}
+      {runs.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search by run #, runner, store, barcode, or style…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="dropped_off">Dropped Off</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {/* Runs Grid */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
@@ -540,6 +603,12 @@ export default function Runs() {
               <Button onClick={() => setShowGenerateDialog(true)}>Generate First Run</Button>
             ) : null
           }
+        />
+      ) : filteredRuns.length === 0 ? (
+        <EmptyState
+          icon={Truck}
+          title="No runs match your search"
+          description="Try a different run number, runner name, or status filter."
         />
       ) : (
         <div className="grid gap-4">
