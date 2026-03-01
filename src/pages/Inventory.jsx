@@ -25,6 +25,7 @@ import {
   Printer,
   CheckSquare,
   Square,
+  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,6 +68,26 @@ import CSVUploader from '@/components/admin/CSVUploader';
 import LabelPrinter from '@/components/admin/LabelPrinter';
 import PageHeader from '@/components/admin/PageHeader';
 import EmptyState from '@/components/admin/EmptyState';
+
+async function loadImageAsDataUrl(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
 
 const processGoogleDriveLink = (url) => {
   if (!url) return url;
@@ -113,6 +134,7 @@ export default function Inventory() {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isPdfGenerating, setIsPdfGenerating] = useState(false);
 
   // Get unique categories from products
   const categories = [...new Set(products.map((p) => p.category).filter(Boolean))];
@@ -455,6 +477,131 @@ export default function Inventory() {
     toast.success('Products exported');
   }
 
+  async function generateStorePDF() {
+    const { jsPDF } = await import('jspdf');
+
+    // Layout constants (A4, mm)
+    const margin = 15;
+    const contentW = 180;
+    const cols = 3;
+    const colW = contentW / cols; // 60mm
+    const imgSize = 45;
+    const cardH = imgSize + 20; // 65mm
+    const gutter = 6;
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageH = doc.internal.pageSize.getHeight();
+
+    // Deduplicate by style_name within each store group
+    const storeMap = new Map();
+    for (const product of products) {
+      const storeId = product.store_id || '__none__';
+      if (!storeMap.has(storeId)) storeMap.set(storeId, new Map());
+      const styleMap = storeMap.get(storeId);
+      if (!styleMap.has(product.style_name)) {
+        styleMap.set(product.style_name, product);
+      }
+    }
+
+    let isFirstStore = true;
+    for (const [storeId, styleMap] of storeMap) {
+      const storeName =
+        storeId === '__none__'
+          ? 'No Store'
+          : stores.find((s) => s.id === storeId)?.name || storeId;
+      const storeProducts = Array.from(styleMap.values());
+
+      if (!isFirstStore) doc.addPage();
+      isFirstStore = false;
+
+      // Store header
+      let y = margin;
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(storeName, margin, y);
+      y += 6;
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${storeProducts.length} SKU${storeProducts.length !== 1 ? 's' : ''}`, margin, y);
+      y += 8;
+
+      let col = 0;
+      for (const product of storeProducts) {
+        // Check if we need a new page
+        if (y + cardH > pageH - margin) {
+          doc.addPage();
+          y = margin;
+          doc.setFontSize(11);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`${storeName} (continued)`, margin, y);
+          y += 10;
+          col = 0;
+        }
+
+        const x = margin + col * (colW + gutter);
+
+        // Image
+        const rawUrl = product.image_url ? processGoogleDriveLink(product.image_url) : null;
+        const imgUrl = rawUrl
+          ? rawUrl.replace('sz=w200', 'sz=w400')
+          : null;
+
+        let imgLoaded = false;
+        if (imgUrl) {
+          const dataUrl = await loadImageAsDataUrl(imgUrl);
+          if (dataUrl) {
+            try {
+              doc.addImage(dataUrl, 'JPEG', x, y, imgSize, imgSize);
+              imgLoaded = true;
+            } catch {
+              // fall through to placeholder
+            }
+          }
+        }
+        if (!imgLoaded) {
+          // Gray placeholder
+          doc.setFillColor(220, 220, 220);
+          doc.rect(x, y, imgSize, imgSize, 'F');
+        }
+
+        // Barcode text (bold, 7pt)
+        const textY = y + imgSize + 4;
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        const barcodeText = product.barcode || '';
+        doc.text(barcodeText, x, textY, { maxWidth: colW - 2 });
+
+        // Style name (normal, 7pt)
+        doc.setFont('helvetica', 'normal');
+        const styleText = product.style_name || '';
+        doc.text(styleText, x, textY + 5, { maxWidth: colW - 2 });
+
+        col++;
+        if (col >= cols) {
+          col = 0;
+          y += cardH + 4;
+        }
+      }
+    }
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    doc.save(`inventory_by_store_${dateStr}.pdf`);
+  }
+
+  async function handleGeneratePdf() {
+    setIsPdfGenerating(true);
+    const toastId = toast.loading('Generating store PDF…');
+    try {
+      await generateStorePDF();
+      toast.success('PDF downloaded', { id: toastId });
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to generate PDF', { id: toastId });
+    } finally {
+      setIsPdfGenerating(false);
+    }
+  }
+
   const selectedProductsData = products.filter((p) => selectedProducts.includes(p.id));
 
   return (
@@ -478,6 +625,19 @@ export default function Inventory() {
             </Button>
           </>
         )}
+        <Button
+          variant="outline"
+          onClick={handleGeneratePdf}
+          disabled={isPdfGenerating}
+          className="shrink-0"
+        >
+          {isPdfGenerating ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <FileText className="w-4 h-4 mr-2" />
+          )}
+          Store PDF
+        </Button>
         <Button
           variant="outline"
           onClick={exportProducts}
