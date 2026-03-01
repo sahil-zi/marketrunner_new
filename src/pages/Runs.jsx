@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { createOne, updateOne, filterBy, bulkInsert } from '@/api/supabase/helpers';
+import { createOne, updateOne, filterBy, bulkInsert, bulkDelete } from '@/api/supabase/helpers';
 import { supabase } from '@/api/supabaseClient';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
@@ -141,6 +141,9 @@ export default function Runs() {
   const [successDialog, setSuccessDialog] = useState(null); // { runNumber, items }
   const [editRunDialog, setEditRunDialog] = useState(null); // run object
   const [editRunDate, setEditRunDate] = useState('');
+  const [editItemsDialog, setEditItemsDialog] = useState(null); // run object
+  const [editItemsData, setEditItemsData] = useState([]);
+  const [isSavingItems, setIsSavingItems] = useState(false);
 
   // ---- Derived ----
   const hasPendingItems = pendingOrderItems.length > 0 || pendingReturnItems.length > 0;
@@ -552,6 +555,74 @@ export default function Runs() {
     }
   }
 
+  // ---- Edit items on completed/dropped_off runs ----
+  async function openEditItemsDialog(run) {
+    const items = await loadRunItems(run.id);
+    setEditItemsData(items.map((i) => ({ ...i })));
+    setEditItemsDialog(run);
+  }
+
+  function updateEditItemQty(id, value) {
+    setEditItemsData((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, picked_qty: value } : i))
+    );
+  }
+
+  async function saveRunItems() {
+    setIsSavingItems(true);
+    try {
+      const original = runItemsCache[editItemsDialog.id] || [];
+      const originalMap = Object.fromEntries(original.map((i) => [i.id, i]));
+      const changed = editItemsData.filter(
+        (i) => originalMap[i.id] && originalMap[i.id].picked_qty !== i.picked_qty
+      );
+      for (const item of changed) {
+        await updateOne('run_items', item.id, { picked_qty: Number(item.picked_qty) });
+      }
+      setRunItemsCache((prev) => ({ ...prev, [editItemsDialog.id]: editItemsData }));
+
+      // Recalculate ledger entries for completed/dropped_off runs
+      const storeMap = {};
+      for (const item of editItemsData) {
+        if (!item.store_id) continue;
+        if (!storeMap[item.store_id]) {
+          storeMap[item.store_id] = { store_id: item.store_id, store_name: item.store_name || '', pickup: 0, return: 0 };
+        }
+        const amount = (item.picked_qty || 0) * (item.cost_price || 0);
+        if (item.type === 'pickup') storeMap[item.store_id].pickup += amount;
+        else if (item.type === 'return') storeMap[item.store_id].return += amount;
+      }
+      const existingEntries = await filterBy('ledger', { run_number: editItemsDialog.run_number });
+      if (existingEntries.length > 0) {
+        await bulkDelete('ledger', existingEntries.map((e) => e.id));
+      }
+      const today = new Date().toISOString().split('T')[0];
+      for (const s of Object.values(storeMap)) {
+        const net = s.pickup - s.return;
+        if (net === 0) continue;
+        const hasPickup = s.pickup > 0;
+        const hasReturn = s.return > 0;
+        await createOne('ledger', {
+          store_id: s.store_id,
+          store_name: s.store_name,
+          transaction_type: net > 0 ? 'debit' : 'credit',
+          amount: Math.abs(net),
+          date: today,
+          notes: `Run #${editItemsDialog.run_number} - ${hasPickup ? 'pickups' : ''}${hasPickup && hasReturn ? ' & ' : ''}${hasReturn ? 'returns' : ''}`,
+          run_number: editItemsDialog.run_number,
+        });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['ledger'] });
+      toast.success('Items updated and store balances recalculated');
+      setEditItemsDialog(null);
+    } catch {
+      toast.error('Failed to save items');
+    } finally {
+      setIsSavingItems(false);
+    }
+  }
+
   // ---- Cancel runs ----
   async function cancelRuns() {
     setIsCancelling(true);
@@ -831,6 +902,17 @@ export default function Runs() {
                           Mark Complete
                         </Button>
                       )}
+                      {(run.status === 'completed' || run.status === 'dropped_off') && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditItemsDialog(run)}
+                          aria-label={`Edit items for run ${run.run_number}`}
+                        >
+                          <Pencil className="w-4 h-4 mr-2" />
+                          Edit Items
+                        </Button>
+                      )}
                       <Link to={createPageUrl(`RunDetails?id=${run.id}`)}>
                         <Button variant="outline" size="sm" aria-label={`View run ${run.run_number}`}>
                           <Eye className="w-4 h-4 mr-2" />
@@ -1054,6 +1136,71 @@ export default function Runs() {
                 </>
               ) : (
                 'Save'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Items Dialog */}
+      <Dialog open={!!editItemsDialog} onOpenChange={() => setEditItemsDialog(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Items — Run #{editItemsDialog?.run_number}</DialogTitle>
+            <DialogDescription>
+              Adjust picked quantities. Store balances will be recalculated on save.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground text-left">
+                  <th className="pb-2 pr-3">Store</th>
+                  <th className="pb-2 pr-3">Barcode</th>
+                  <th className="pb-2 pr-3">Style / Size</th>
+                  <th className="pb-2 pr-3 text-center">Type</th>
+                  <th className="pb-2 pr-3 text-center">Target</th>
+                  <th className="pb-2 text-center">Picked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {editItemsData.map((item) => (
+                  <tr key={item.id} className="border-b border-border/50">
+                    <td className="py-2 pr-3 text-muted-foreground">{item.store_name}</td>
+                    <td className="py-2 pr-3 font-mono text-xs">{item.barcode}</td>
+                    <td className="py-2 pr-3">{item.style_name}{item.size ? ` / ${item.size}` : ''}</td>
+                    <td className="py-2 pr-3 text-center">
+                      <span className={item.type === 'return' ? 'text-purple-400' : ''}>
+                        {item.type}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-center">{item.target_qty}</td>
+                    <td className="py-2 text-center">
+                      <Input
+                        type="number"
+                        min="0"
+                        value={item.picked_qty}
+                        onChange={(e) => updateEditItemQty(item.id, Number(e.target.value))}
+                        className="w-16 text-center p-1 h-7 mx-auto"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditItemsDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={saveRunItems} disabled={isSavingItems}>
+              {isSavingItems ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save & Recalculate Balance'
               )}
             </Button>
           </DialogFooter>
