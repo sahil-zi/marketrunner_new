@@ -4,8 +4,10 @@ import { Printer, Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Generate ZPL for QR code layout (4x3cm label, 203dpi)
-function generateQRLayout(barcode, style, size) {
+function generateQRLayout(barcode, style, size, platform) {
+  const platformField = platform ? `^FO365,8^A0N,24,24^FD${platform}^FS` : '';
   return `^XA^PW400^LL240^CI28
+${platformField}
 ^FO10,40^BQN,2,7^FDQA,${barcode}^FS
 ^FO10,250^A0N,22,22^FB140,1,0,C,0^FD${barcode}^FS
 ^FO240,75^A0N,35,35^FB150,1,0,L^FDStyle:^FS
@@ -15,8 +17,10 @@ function generateQRLayout(barcode, style, size) {
 }
 
 // Generate ZPL for Barcode (Code 128) layout (4x3cm label, 203dpi)
-function generateBarcodeLayout(barcode, style, size) {
+function generateBarcodeLayout(barcode, style, size, platform) {
+  const platformField = platform ? `^FO365,5^A0N,24,24^FD${platform}^FS` : '';
   return `^XA^PW400^LL240^CI28
+${platformField}
 ^FO60,30^BY2,2.0,60^BCN,80,N,N,N^FD${barcode}^FS
 ^FO125,130^A0N,22,22^FB150,1,0,C,0^FD${barcode}^FS
 ^FO100,170^A0N,25,25^FB150,1,0,L^FDStyle:^FS
@@ -68,8 +72,9 @@ export function generateZPL(items, mode = 'QR') {
       const size = item.size || '';
       const qty = item.target_qty || item.quantity || 1;
 
+      const platform = item.platform || '';
       for (let i = 0; i < qty; i++) {
-        zpl += layoutFn(barcode, style, size) + '\n';
+        zpl += layoutFn(barcode, style, size, platform) + '\n';
       }
     });
 

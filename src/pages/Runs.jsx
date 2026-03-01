@@ -419,14 +419,46 @@ export default function Runs() {
     }
   }
 
+  // ---- Enrich run items with platform abbreviation ----
+  const PLATFORM_ABBR = { Amazon: 'A', Namshi: 'N', Trendyol: 'T', Noon: 'n' };
+
+  async function enrichWithPlatform(items, runId) {
+    try {
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('barcode, order_id')
+        .eq('run_id', runId);
+      if (!orderItems || orderItems.length === 0) return items;
+
+      const orderIds = [...new Set(orderItems.map((i) => i.order_id).filter(Boolean))];
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('id, platform_name')
+        .in('id', orderIds);
+      if (!orders) return items;
+
+      const orderMap = Object.fromEntries(orders.map((o) => [o.id, o.platform_name]));
+      const barcodeToAbbr = {};
+      orderItems.forEach((oi) => {
+        if (oi.order_id && orderMap[oi.order_id]) {
+          barcodeToAbbr[oi.barcode] = PLATFORM_ABBR[orderMap[oi.order_id]] || '';
+        }
+      });
+
+      return items.map((item) => ({ ...item, platform: barcodeToAbbr[item.barcode] || '' }));
+    } catch {
+      return items; // non-fatal — print without platform if lookup fails
+    }
+  }
+
   // ---- Print labels ----
   async function printRunLabels(runId) {
-    const items = await loadRunItems(runId);
-    if (items.length === 0) {
+    const rawItems = await loadRunItems(runId);
+    if (rawItems.length === 0) {
       toast.error('No items in this run');
       return;
     }
-
+    const items = await enrichWithPlatform(rawItems, runId);
     const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
     const zpl = generateZPL(items);
     await printToZebra(zpl);
@@ -434,11 +466,12 @@ export default function Runs() {
 
   // ---- Export ZPL ----
   async function exportRunZPL(runId) {
-    const items = await loadRunItems(runId);
-    if (items.length === 0) {
+    const rawItems = await loadRunItems(runId);
+    if (rawItems.length === 0) {
       toast.error('No items in this run');
       return;
     }
+    const items = await enrichWithPlatform(rawItems, runId);
     const run = runs.find((r) => r.id === runId);
     const zpl = generateZPL(items);
     downloadZPLFile(zpl, `run_${run?.run_number || runId}_labels.zpl`);
