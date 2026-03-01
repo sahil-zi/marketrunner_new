@@ -10,6 +10,8 @@ import {
   ArrowRight,
   Loader2,
   RefreshCw,
+  Printer,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -44,6 +46,7 @@ export default function RunnerHome() {
   const { data: allConfirmations = [], isLoading: confirmationsLoading, refetch: refetchConfirmations } = useAllRunConfirmations();
   const [activeTab, setActiveTab] = useState('new');
   const [droppingOff, setDroppingOff] = useState(null); // runId being dropped off
+  const [printingRun, setPrintingRun] = useState(null); // runId being printed
 
   const isLoading = userLoading || runsLoading || itemsLoading || confirmationsLoading;
 
@@ -118,6 +121,66 @@ export default function RunnerHome() {
     refetchItems();
     refetchConfirmations();
   };
+
+  async function loadRunItems(runId) {
+    return filterBy('run_items', { run_id: runId });
+  }
+
+  async function enrichWithOrderNumber(items, runId) {
+    try {
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('barcode, order_id')
+        .eq('run_id', runId);
+      if (!orderItems || orderItems.length === 0) return items;
+      const orderIds = [...new Set(orderItems.map((i) => i.order_id).filter(Boolean))];
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('id, platform_order_id')
+        .in('id', orderIds);
+      if (!orders) return items;
+      const orderMap = Object.fromEntries(orders.map((o) => [o.id, o.platform_order_id]));
+      const barcodeToOrderNumber = {};
+      orderItems.forEach((oi) => {
+        if (oi.order_id && orderMap[oi.order_id]) {
+          barcodeToOrderNumber[oi.barcode] = orderMap[oi.order_id];
+        }
+      });
+      return items.map((item) => ({ ...item, order_number: barcodeToOrderNumber[item.barcode] || '' }));
+    } catch {
+      return items;
+    }
+  }
+
+  async function printRunLabels(run) {
+    setPrintingRun(run.id);
+    try {
+      const rawItems = await loadRunItems(run.id);
+      if (rawItems.length === 0) { toast.error('No items in this run'); return; }
+      const items = await enrichWithOrderNumber(rawItems, run.id);
+      const { printToZebra, generateZPL } = await import('@/components/admin/LabelPrinter');
+      await printToZebra(generateZPL(items));
+    } catch {
+      toast.error('Failed to print labels');
+    } finally {
+      setPrintingRun(null);
+    }
+  }
+
+  async function exportRunZPL(run) {
+    setPrintingRun(run.id);
+    try {
+      const rawItems = await loadRunItems(run.id);
+      if (rawItems.length === 0) { toast.error('No items in this run'); return; }
+      const items = await enrichWithOrderNumber(rawItems, run.id);
+      const { generateZPL, downloadZPLFile } = await import('@/components/admin/LabelPrinter');
+      downloadZPLFile(generateZPL(items), `run_${run.run_number}_labels.zpl`);
+    } catch {
+      toast.error('Failed to export ZPL');
+    } finally {
+      setPrintingRun(null);
+    }
+  }
 
   const handleMarkDroppedOff = async (e, run) => {
     e.stopPropagation();
@@ -351,18 +414,41 @@ export default function RunnerHome() {
                   </Card>
                 </div>
 
-                {/* Mark Dropped Off sits OUTSIDE the clickable card to avoid event conflicts */}
-                {canMarkDroppedOff && (
+                {/* Buttons outside the clickable card to avoid event conflicts */}
+                <div className="flex gap-2">
                   <Button
-                    className="w-full"
+                    className="flex-1"
                     variant="outline"
-                    onClick={() => handleMarkDroppedOff({ stopPropagation: () => {} }, run)}
-                    disabled={droppingOff === run.id}
+                    onClick={() => printRunLabels(run)}
+                    disabled={printingRun === run.id}
                   >
-                    {droppingOff === run.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Mark Dropped Off
+                    {printingRun === run.id ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Printer className="mr-2 h-4 w-4" />
+                    )}
+                    Print Labels
                   </Button>
-                )}
+                  <Button
+                    variant="outline"
+                    onClick={() => exportRunZPL(run)}
+                    disabled={printingRun === run.id}
+                    aria-label="Export ZPL"
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                  {canMarkDroppedOff && (
+                    <Button
+                      className="flex-1"
+                      variant="outline"
+                      onClick={() => handleMarkDroppedOff({ stopPropagation: () => {} }, run)}
+                      disabled={droppingOff === run.id}
+                    >
+                      {droppingOff === run.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Mark Dropped Off
+                    </Button>
+                  )}
+                </div>
               </motion.div>
             );
           })}
